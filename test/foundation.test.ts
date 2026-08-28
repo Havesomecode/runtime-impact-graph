@@ -1,0 +1,481 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import {
+  createGraph,
+  ContainmentCycleError,
+  mergeSnapshots,
+  NoActiveExecutionError,
+  toCanonicalJson,
+  toDot,
+} from '../src/index.js';
+
+describe('package foundation', () => {
+  it('creates a versioned deterministic empty snapshot', () => {
+    const graph = createGraph({ metadataSchema: {} });
+
+    const snapshot = graph.snapshot();
+
+    assert.equal(snapshot.format, 'runtime-impact-graph/v0.1');
+    assert.match(snapshot.schemaFingerprint, /^[0-9a-f]{64}$/u);
+    assert.deepEqual(snapshot.nodes, []);
+    assert.deepEqual(snapshot.edges, []);
+    assert.deepEqual(snapshot.cycles, []);
+    assert.deepEqual(snapshot.warnings, []);
+    assert.equal(toCanonicalJson(snapshot), `${JSON.stringify(snapshot)}\n`);
+  });
+
+  it('canonicalizes equivalent snapshot order before serialization', () => {
+    const graph = createGraph({ metadataSchema: {} });
+    graph.run(() => {
+      graph.observe({ id: 'b', kind: 'resource', label: 'B' });
+      graph.observe({ id: 'a', kind: 'resource', label: 'A' });
+    });
+    const sorted = graph.snapshot();
+    const reversed = { ...sorted, nodes: [...sorted.nodes].reverse() };
+
+    assert.equal(toCanonicalJson(reversed), toCanonicalJson(sorted));
+  });
+
+  it('rejects non-finite metadata during serialization', () => {
+    const graph = createGraph({ metadataSchema: {} });
+    const snapshot = graph.snapshot();
+    const malformed = {
+      ...snapshot,
+      nodes: [
+        {
+          id: 'bad',
+          kind: 'resource',
+          label: 'Bad',
+          metadata: { value: Number.NaN },
+          observations: 1,
+        },
+      ],
+    };
+
+    assert.throws(() => toCanonicalJson(malformed as never), TypeError);
+  });
+
+  it('records semantic nodes and containment inside an execution root', async () => {
+    const graph = createGraph({ metadataSchema: {} });
+
+    await graph.run(async () => {
+      await graph.withNode(
+        { id: 'route:home', kind: 'route', label: 'Home', metadata: {} },
+        async () => {
+          graph.observe({
+            id: 'loader:settings',
+            kind: 'loader',
+            label: 'Settings loader',
+            metadata: {},
+          });
+          await graph.withNode(
+            {
+              id: 'capability:greeting',
+              kind: 'capability',
+              label: 'Greeting',
+              metadata: {},
+            },
+            async () => Promise.resolve(),
+          );
+        },
+      );
+    });
+
+    assert.deepEqual(graph.snapshot().nodes, [
+      {
+        id: 'capability:greeting',
+        kind: 'capability',
+        label: 'Greeting',
+        metadata: {},
+        observations: 1,
+      },
+      {
+        id: 'loader:settings',
+        kind: 'loader',
+        label: 'Settings loader',
+        metadata: {},
+        observations: 1,
+      },
+      {
+        id: 'route:home',
+        kind: 'route',
+        label: 'Home',
+        metadata: {},
+        observations: 1,
+      },
+    ]);
+    assert.deepEqual(graph.snapshot().edges, [
+      {
+        from: 'route:home',
+        to: 'capability:greeting',
+        kind: 'contains',
+        observations: 1,
+      },
+    ]);
+  });
+
+  it('rejects observations outside an active execution without mutation', () => {
+    const graph = createGraph({ metadataSchema: {} });
+    const descriptor = {
+      id: 'resource:theme',
+      kind: 'resource' as const,
+      label: 'Theme',
+      metadata: {},
+    };
+
+    assert.throws(() => graph.observe(descriptor), NoActiveExecutionError);
+    assert.throws(
+      () => graph.withNode(descriptor, () => undefined),
+      NoActiveExecutionError,
+    );
+    assert.deepEqual(graph.snapshot().nodes, []);
+  });
+
+  it('rejects invalid runtime node kinds before mutation', () => {
+    const graph = createGraph({ metadataSchema: {} });
+
+    assert.throws(() => {
+      graph.run(() => {
+        graph.observe({
+          id: 'invalid',
+          kind: 'invalid',
+          label: 'Invalid',
+        } as never);
+      });
+    }, TypeError);
+    assert.deepEqual(graph.snapshot().nodes, []);
+  });
+
+  it('records explicit dependencies and reports their strongly connected components', () => {
+    const graph = createGraph({ metadataSchema: {} });
+
+    graph.run(() => {
+      graph.observe({ id: 'a', kind: 'resource', label: 'A' });
+      graph.observe({ id: 'b', kind: 'derived', label: 'B' });
+      graph.observe({ id: 'c', kind: 'resource', label: 'C' });
+      graph.dependsOn('a', 'b');
+      graph.dependsOn('b', 'a');
+      graph.dependsOn('c', 'c');
+    });
+
+    assert.deepEqual(graph.snapshot().edges, [
+      { from: 'a', to: 'b', kind: 'dependsOn', observations: 1 },
+      { from: 'b', to: 'a', kind: 'dependsOn', observations: 1 },
+      { from: 'c', to: 'c', kind: 'dependsOn', observations: 1 },
+    ]);
+    assert.deepEqual(graph.snapshot().cycles, [['a', 'b'], ['c']]);
+  });
+
+  it('analyzes a valid default-capacity dependency chain without stack exhaustion', () => {
+    const graph = createGraph({ metadataSchema: {} });
+    const count = 10_000;
+    graph.run(() => {
+      for (let index = 0; index < count; index += 1) {
+        const id = `n${String(index).padStart(5, '0')}`;
+        graph.observe({ id, kind: 'resource', label: id });
+      }
+      for (let index = 0; index < count - 1; index += 1) {
+        const from = `n${String(index).padStart(5, '0')}`;
+        const to = `n${String(index + 1).padStart(5, '0')}`;
+        graph.dependsOn(from, to);
+      }
+    });
+
+    assert.deepEqual(graph.snapshot().cycles, []);
+  });
+
+  it('applies allowlisted metadata rules and redaction', () => {
+    const graph = createGraph({
+      metadataSalt: 'fixture-salt',
+      metadataSchema: {
+        customKind: { type: 'string', mode: 'constant', redact: 'none' },
+        public: { type: 'string', mode: 'constant', redact: 'none' },
+        secret: { type: 'string', mode: 'constant', redact: 'sha256' },
+        enabled: { type: 'boolean', mode: 'constant', redact: 'none' },
+        omitted: { type: 'string', mode: 'constant', redact: 'drop' },
+      },
+    });
+
+    graph.run(() => {
+      graph.observe({
+        id: 'custom:widget',
+        kind: 'custom',
+        label: 'Widget',
+        metadata: {
+          omitted: 'drop me',
+          enabled: false,
+          secret: 'sensitive',
+          public: 'safe',
+          customKind: 'widget',
+        },
+      });
+    });
+
+    const metadata = graph.snapshot().nodes[0]?.metadata;
+    assert.deepEqual(Object.keys(metadata ?? {}), [
+      'customKind',
+      'enabled',
+      'public',
+      'secret',
+    ]);
+    assert.equal(metadata?.customKind, 'widget');
+    assert.equal(metadata?.enabled, false);
+    assert.equal(metadata?.public, 'safe');
+    assert.match(String(metadata?.secret), /^[0-9a-f]{64}$/);
+  });
+
+  it('merges compatible snapshots by summing observation counts', () => {
+    const first = createGraph({ metadataSchema: {} });
+    const second = createGraph({ metadataSchema: {} });
+    for (const graph of [first, second]) {
+      graph.run(() => {
+        graph.observe({
+          id: 'resource:theme',
+          kind: 'resource',
+          label: 'Theme',
+        });
+      });
+    }
+
+    const merged = mergeSnapshots([first.snapshot(), second.snapshot()]);
+
+    assert.equal(merged.nodes[0]?.observations, 2);
+    assert.deepEqual(merged.edges, []);
+    assert.deepEqual(merged.cycles, []);
+  });
+
+  it('merges set metadata across compatible snapshots', () => {
+    const options = {
+      metadataSchema: {
+        tags: {
+          type: 'string' as const,
+          mode: 'set' as const,
+          maxDistinct: 2,
+          redact: 'none' as const,
+        },
+      },
+    };
+    const first = createGraph(options);
+    const second = createGraph(options);
+    first.run(() => {
+      first.observe({
+        id: 'shared',
+        kind: 'resource',
+        label: 'Shared',
+        metadata: { tags: 'a' },
+      });
+    });
+    second.run(() => {
+      second.observe({
+        id: 'shared',
+        kind: 'resource',
+        label: 'Shared',
+        metadata: { tags: 'b' },
+      });
+    });
+
+    const merged = mergeSnapshots([first.snapshot(), second.snapshot()]);
+
+    assert.deepEqual(merged.nodes[0]?.metadata.tags, ['a', 'b']);
+  });
+
+  it('rejects merged set metadata beyond the declared cardinality', () => {
+    const options = {
+      metadataSchema: {
+        tags: {
+          type: 'string' as const,
+          mode: 'set' as const,
+          maxDistinct: 1,
+          redact: 'none' as const,
+        },
+      },
+    };
+    const first = createGraph(options);
+    const second = createGraph(options);
+    first.run(() => {
+      first.observe({
+        id: 'shared',
+        kind: 'resource',
+        label: 'Shared',
+        metadata: { tags: 'a' },
+      });
+    });
+    second.run(() => {
+      second.observe({
+        id: 'shared',
+        kind: 'resource',
+        label: 'Shared',
+        metadata: { tags: 'b' },
+      });
+    });
+
+    assert.throws(
+      () => mergeSnapshots([first.snapshot(), second.snapshot()]),
+      TypeError,
+    );
+  });
+
+  it('rejects containment cycles formed only by snapshot union', () => {
+    const forward = createGraph({ metadataSchema: {} });
+    forward.run(() => {
+      forward.withNode({ id: 'a', kind: 'route', label: 'A' }, () =>
+        forward.withNode(
+          { id: 'b', kind: 'capability', label: 'B' },
+          () => undefined,
+        ),
+      );
+    });
+    const reverse = createGraph({ metadataSchema: {} });
+    reverse.run(() => {
+      reverse.withNode({ id: 'b', kind: 'capability', label: 'B' }, () =>
+        reverse.withNode(
+          { id: 'a', kind: 'route', label: 'A' },
+          () => undefined,
+        ),
+      );
+    });
+
+    assert.throws(
+      () => mergeSnapshots([forward.snapshot(), reverse.snapshot()]),
+      TypeError,
+    );
+  });
+
+  it('renders deterministic Graphviz DOT from a snapshot', () => {
+    const graph = createGraph({ metadataSchema: {} });
+    graph.run(() => {
+      graph.observe({ id: 'a', kind: 'resource', label: 'A' });
+      graph.observe({ id: 'b', kind: 'derived', label: 'B' });
+      graph.dependsOn('a', 'b');
+    });
+
+    assert.equal(
+      toDot(graph.snapshot()),
+      [
+        'strict digraph RuntimeImpactGraph {',
+        '  graph [rankdir="LR"];',
+        '  node [shape="box"];',
+        '  edge [];',
+        '  "a" [label="A\\nresource"];',
+        '  "b" [label="B\\nderived"];',
+        '  "a" -> "b" [label="dependsOn × 1"];',
+        '}',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('rejects containment cycles before mutating the graph', () => {
+    const graph = createGraph({ metadataSchema: {} });
+    const descriptor = { id: 'route:a', kind: 'route' as const, label: 'A' };
+
+    graph.run(() => {
+      graph.withNode(descriptor, () => {
+        assert.throws(
+          () => graph.withNode(descriptor, () => undefined),
+          ContainmentCycleError,
+        );
+      });
+    });
+
+    assert.equal(graph.snapshot().nodes[0]?.observations, 1);
+    assert.deepEqual(graph.snapshot().edges, []);
+  });
+
+  it('rejects cross-execution containment cycles without partial mutation', () => {
+    const graph = createGraph({ metadataSchema: {} });
+    const a = { id: 'a', kind: 'route' as const, label: 'A' };
+    const b = { id: 'b', kind: 'capability' as const, label: 'B' };
+
+    graph.run(() => {
+      graph.withNode(a, () => graph.withNode(b, () => undefined));
+    });
+    assert.throws(() => {
+      graph.run(() => {
+        graph.withNode(b, () => graph.withNode(a, () => undefined));
+      });
+    }, ContainmentCycleError);
+
+    assert.deepEqual(
+      graph.snapshot().nodes.map((node) => node.observations),
+      [1, 2],
+    );
+    assert.deepEqual(graph.snapshot().edges, [
+      { from: 'a', to: 'b', kind: 'contains', observations: 1 },
+    ]);
+  });
+
+  it('drops over-limit nodes without retaining their identifiers', () => {
+    const graph = createGraph({
+      metadataSchema: {},
+      maxNodes: 1,
+      onLimit: 'drop',
+    });
+
+    graph.run(() => {
+      graph.observe({ id: 'accepted', kind: 'resource', label: 'Accepted' });
+      graph.observe({ id: 'private-id', kind: 'resource', label: 'Dropped' });
+    });
+
+    assert.deepEqual(
+      graph.snapshot().nodes.map((node) => node.id),
+      ['accepted'],
+    );
+    assert.deepEqual(graph.snapshot().warnings, [
+      { code: 'node-limit', count: 1 },
+    ]);
+    assert.doesNotMatch(toCanonicalJson(graph.snapshot()), /private-id/);
+  });
+
+  it('keeps intentionally interleaved execution roots isolated', async () => {
+    const graph = createGraph({ metadataSchema: {} });
+    let releaseFirst: (() => void) | undefined;
+    const firstCanContinue = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    await Promise.all([
+      graph.run(async () => {
+        await graph.withNode(
+          { id: 'route:a', kind: 'route', label: 'Route A' },
+          async () => {
+            await firstCanContinue;
+            await graph.withNode(
+              { id: 'capability:a', kind: 'capability', label: 'A' },
+              async () => Promise.resolve(),
+            );
+          },
+        );
+      }),
+      graph.run(async () => {
+        await graph.withNode(
+          { id: 'route:b', kind: 'route', label: 'Route B' },
+          async () => {
+            releaseFirst?.();
+            await Promise.resolve();
+            await graph.withNode(
+              { id: 'capability:b', kind: 'capability', label: 'B' },
+              async () => Promise.resolve(),
+            );
+          },
+        );
+      }),
+    ]);
+
+    assert.deepEqual(graph.snapshot().edges, [
+      {
+        from: 'route:a',
+        to: 'capability:a',
+        kind: 'contains',
+        observations: 1,
+      },
+      {
+        from: 'route:b',
+        to: 'capability:b',
+        kind: 'contains',
+        observations: 1,
+      },
+    ]);
+  });
+});
