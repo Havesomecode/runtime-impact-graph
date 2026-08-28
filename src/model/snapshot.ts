@@ -1,4 +1,9 @@
 import { compareCanonical } from './canonical.js';
+import {
+  fingerprintMetadataPolicy,
+  normalizeMetadataSchema,
+  validateSnapshotNodeMetadata,
+} from './metadata.js';
 import type {
   EdgeKind,
   EdgeV1,
@@ -7,6 +12,7 @@ import type {
   NodeKind,
   NodeV1,
   SnapshotWarningV1,
+  SnapshotMetadataPolicyV1,
 } from './types.js';
 
 const NODE_KINDS = new Set<NodeKind>([
@@ -172,6 +178,32 @@ function canonicalWarning(value: unknown): SnapshotWarningV1 {
   return { code: value.code, count: value.count };
 }
 
+function canonicalMetadataPolicy(value: unknown): SnapshotMetadataPolicyV1 {
+  assertRecord(value, 'Snapshot metadata policy');
+  const allowedKeys = new Set(['schema', 'sha256SaltFingerprint']);
+  if (Object.keys(value).some((key) => !allowedKeys.has(key))) {
+    throw new TypeError('Snapshot metadata policy is invalid.');
+  }
+  const schema = normalizeMetadataSchema(value.schema as never);
+  const usesSha256 = Object.values(schema).some(
+    (rule) => rule.redact === 'sha256',
+  );
+  if (
+    (usesSha256 &&
+      (typeof value.sha256SaltFingerprint !== 'string' ||
+        !/^[0-9a-f]{64}$/u.test(value.sha256SaltFingerprint))) ||
+    (!usesSha256 && value.sha256SaltFingerprint !== undefined)
+  ) {
+    throw new TypeError('Snapshot metadata policy salt identity is invalid.');
+  }
+  return {
+    schema,
+    ...(usesSha256
+      ? { sha256SaltFingerprint: value.sha256SaltFingerprint as string }
+      : {}),
+  };
+}
+
 export function canonicalizeSnapshot(value: unknown): GraphSnapshotV1 {
   assertRecord(value, 'Snapshot');
   if (
@@ -185,10 +217,17 @@ export function canonicalizeSnapshot(value: unknown): GraphSnapshotV1 {
   ) {
     throw new TypeError('Snapshot envelope is invalid.');
   }
+  const metadataPolicy = canonicalMetadataPolicy(value.metadataPolicy);
+  if (fingerprintMetadataPolicy(metadataPolicy) !== value.schemaFingerprint) {
+    throw new TypeError('Snapshot metadata policy fingerprint is invalid.');
+  }
 
   const nodes = value.nodes
     .map(canonicalNode)
     .sort((left, right) => compareCanonical(left.id, right.id));
+  for (const node of nodes) {
+    validateSnapshotNodeMetadata(node, metadataPolicy.schema);
+  }
   const nodeIds = new Set(nodes.map((node) => node.id));
   if (nodeIds.size !== nodes.length)
     throw new TypeError('Duplicate snapshot node.');
@@ -241,6 +280,7 @@ export function canonicalizeSnapshot(value: unknown): GraphSnapshotV1 {
   return {
     format: 'runtime-impact-graph/v0.1',
     schemaFingerprint: value.schemaFingerprint,
+    metadataPolicy,
     nodes,
     edges,
     cycles,

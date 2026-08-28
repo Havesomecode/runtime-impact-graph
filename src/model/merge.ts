@@ -1,6 +1,6 @@
 import { compareCanonical } from './canonical.js';
 import { findDependencyCycles, hasContainmentCycle } from './cycles.js';
-import { mergeMetadata, registeredMetadataSchema } from './metadata.js';
+import { mergeMetadata } from './metadata.js';
 import { canonicalizeSnapshot } from './snapshot.js';
 import type {
   EdgeV1,
@@ -67,7 +67,7 @@ export function mergeSnapshots(
   const first = canonicalSnapshots[0];
   if (first === undefined)
     throw new TypeError('At least one snapshot is required.');
-  const metadataSchema = registeredMetadataSchema(first.schemaFingerprint);
+  const metadataSchema = first.metadataPolicy.schema;
 
   const nodes = new Map<string, NodeV1>();
   const edges = new Map<string, EdgeV1>();
@@ -164,6 +164,7 @@ export function mergeSnapshots(
   return {
     format: 'runtime-impact-graph/v0.1',
     schemaFingerprint: first.schemaFingerprint,
+    metadataPolicy: first.metadataPolicy,
     nodes: orderedNodes,
     edges: orderedEdges,
     cycles: findDependencyCycles(

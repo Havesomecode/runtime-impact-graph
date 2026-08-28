@@ -3,10 +3,12 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { compareCanonical } from '../model/canonical.js';
 import { findDependencyCycles } from '../model/cycles.js';
 import {
+  createSnapshotMetadataPolicy,
+  fingerprintMetadataPolicy,
   mergeMetadata,
   normalizeMetadataSchema,
   processMetadata,
-  registerMetadataSchema,
+  validateSnapshotNodeMetadata,
 } from '../model/metadata.js';
 import type {
   EdgeMetadata,
@@ -16,6 +18,7 @@ import type {
   MetadataSchema,
   NodeDescriptor,
   NodeV1,
+  SnapshotMetadataPolicyV1,
 } from '../model/types.js';
 import {
   ContainmentCycleError,
@@ -70,6 +73,7 @@ interface MutableEdge {
 export class Graph {
   readonly #storage = new AsyncLocalStorage<ExecutionContext>();
   readonly #schemaFingerprint: string;
+  readonly #metadataPolicy: SnapshotMetadataPolicyV1;
   readonly #metadataSchema: MetadataSchema;
   readonly #metadataSalt: string | undefined;
   readonly #maxNodes: number;
@@ -82,7 +86,11 @@ export class Graph {
   public constructor(options: GraphOptions) {
     this.#metadataSchema = normalizeMetadataSchema(options.metadataSchema);
     this.#metadataSalt = options.metadataSalt;
-    this.#schemaFingerprint = registerMetadataSchema(this.#metadataSchema);
+    this.#metadataPolicy = createSnapshotMetadataPolicy(
+      this.#metadataSchema,
+      this.#metadataSalt,
+    );
+    this.#schemaFingerprint = fingerprintMetadataPolicy(this.#metadataPolicy);
     this.#maxNodes = this.#validateLimit(
       options.maxNodes,
       DEFAULT_MAX_NODES,
@@ -180,6 +188,7 @@ export class Graph {
     return {
       format: 'runtime-impact-graph/v0.1',
       schemaFingerprint: this.#schemaFingerprint,
+      metadataPolicy: this.#metadataPolicy,
       nodes,
       edges,
       cycles: findDependencyCycles(
@@ -228,6 +237,16 @@ export class Graph {
       descriptor.metadata,
       this.#metadataSchema,
       this.#metadataSalt,
+    );
+    validateSnapshotNodeMetadata(
+      {
+        id: descriptor.id,
+        kind: descriptor.kind,
+        label: descriptor.label,
+        metadata,
+        observations: 1,
+      },
+      this.#metadataSchema,
     );
     if (existing === undefined) {
       this.#nodes.set(descriptor.id, {

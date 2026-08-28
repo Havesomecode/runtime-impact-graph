@@ -6,10 +6,11 @@ import type {
   MetadataSchema,
   MetadataValue,
   NodeV1,
+  SnapshotMetadataPolicyV1,
 } from './types.js';
 
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-const REGISTERED_SCHEMAS = new Map<string, MetadataSchema>();
+
 const RULE_KEYS = new Set([
   'type',
   'mode',
@@ -92,13 +93,13 @@ function normalizeRule(value: unknown, key: string): MetadataRule {
     throw new TypeError(`Invalid redaction for ${JSON.stringify(key)}.`);
   }
 
-  return {
+  return Object.freeze({
     type: rule.type,
     mode: rule.mode,
     ...(rule.mode === 'set' ? { maxDistinct: rule.maxDistinct } : {}),
     maxStringLength,
     redact,
-  } as MetadataRule;
+  } as MetadataRule);
 }
 
 export function normalizeMetadataSchema(
@@ -113,28 +114,41 @@ export function normalizeMetadataSchema(
   return Object.freeze(normalized);
 }
 
-export function fingerprintMetadataSchema(schema: MetadataSchema): string {
+export function createSnapshotMetadataPolicy(
+  schema: MetadataSchema,
+  salt: string | undefined,
+): SnapshotMetadataPolicyV1 {
+  const usesSha256 = Object.values(schema).some(
+    (rule) => rule.redact === 'sha256',
+  );
+  if (!usesSha256) return Object.freeze({ schema });
+  if (salt === undefined || salt.length === 0) {
+    throw new TypeError('A non-empty metadataSalt is required for sha256.');
+  }
+  return Object.freeze({
+    schema,
+    sha256SaltFingerprint: createHash('sha256')
+      .update('runtime-impact-graph/metadata-salt/v0.1\0')
+      .update(salt)
+      .digest('hex'),
+  });
+}
+
+export function fingerprintMetadataPolicy(
+  policy: SnapshotMetadataPolicyV1,
+): string {
   return createHash('sha256')
     .update(
       JSON.stringify({
         format: 'runtime-impact-graph/metadata-policy',
         version: '0.1',
-        schema,
+        schema: policy.schema,
+        ...(policy.sha256SaltFingerprint === undefined
+          ? {}
+          : { sha256SaltFingerprint: policy.sha256SaltFingerprint }),
       }),
     )
     .digest('hex');
-}
-
-export function registerMetadataSchema(schema: MetadataSchema): string {
-  const fingerprint = fingerprintMetadataSchema(schema);
-  REGISTERED_SCHEMAS.set(fingerprint, schema);
-  return fingerprint;
-}
-
-export function registeredMetadataSchema(
-  fingerprint: string,
-): MetadataSchema | undefined {
-  return REGISTERED_SCHEMAS.get(fingerprint);
 }
 
 function assertMetadataValue(
@@ -197,6 +211,79 @@ export function processMetadata(
     output[key] = rule.mode === 'set' ? Object.freeze([redacted]) : redacted;
   }
   return Object.freeze(output);
+}
+
+function assertSnapshotMetadataValue(
+  value: MetadataValue,
+  rule: MetadataRule,
+  key: string,
+): void {
+  switch (rule.redact) {
+    case 'drop':
+      throw new TypeError(
+        `Dropped metadata key ${JSON.stringify(key)} must not be present.`,
+      );
+    case 'replace':
+      if (value !== '[REDACTED]') {
+        throw new TypeError(
+          `Invalid replaced metadata for key ${JSON.stringify(key)}.`,
+        );
+      }
+      return;
+    case 'sha256':
+      if (typeof value !== 'string' || !/^[0-9a-f]{64}$/u.test(value)) {
+        throw new TypeError(
+          `Invalid hashed metadata for key ${JSON.stringify(key)}.`,
+        );
+      }
+      return;
+    case 'none':
+      assertMetadataValue(value, rule, key);
+      return;
+  }
+}
+
+export function validateSnapshotNodeMetadata(
+  node: NodeV1,
+  schema: MetadataSchema,
+): void {
+  for (const [key, value] of Object.entries(node.metadata)) {
+    const rule = schema[key];
+    if (rule === undefined) {
+      throw new TypeError(`Undeclared metadata key ${JSON.stringify(key)}.`);
+    }
+    if (rule.mode === 'constant') {
+      if (Array.isArray(value)) {
+        throw new TypeError(
+          `Invalid constant metadata for key ${JSON.stringify(key)}.`,
+        );
+      }
+      assertSnapshotMetadataValue(value as MetadataValue, rule, key);
+      continue;
+    }
+    if (!Array.isArray(value) || value.length > (rule.maxDistinct ?? 0)) {
+      throw new TypeError(
+        `Invalid set metadata for key ${JSON.stringify(key)}.`,
+      );
+    }
+    for (const member of value as readonly MetadataValue[]) {
+      assertSnapshotMetadataValue(member, rule, key);
+    }
+  }
+
+  if (node.kind === 'custom') {
+    const customKind = node.metadata.customKind;
+    const validCustomKind =
+      (typeof customKind === 'string' && customKind.length > 0) ||
+      (Array.isArray(customKind) &&
+        customKind.length > 0 &&
+        customKind.every(
+          (member) => typeof member === 'string' && member.length > 0,
+        ));
+    if (!validCustomKind) {
+      throw new TypeError('Custom snapshot nodes require customKind metadata.');
+    }
+  }
 }
 
 function compareValues(left: MetadataValue, right: MetadataValue): number {

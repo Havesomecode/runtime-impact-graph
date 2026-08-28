@@ -87,4 +87,11 @@ process.stdout.write(toCanonicalJson(graph.snapshot()));
 Metadata is rejected unless its key is declared. Redaction defaults to `drop`;
 `sha256` requires a caller-provided non-empty salt. Graph cardinality defaults
 to 10,000 nodes and 50,000 aggregate edges and can only be configured downward.
+
+Snapshots are portable merge inputs: each includes the normalized metadata
+policy needed for validation in another process or module instance. If `sha256`
+redaction is used, the snapshot includes only a one-way salt compatibility
+fingerprint, never the raw salt; snapshots made with different salts cannot be
+merged. The policy's key names, types, limits, and redaction modes are exported,
+so policy key names must not contain secrets and salts should be high entropy.
 See the frozen architecture contract for the complete safety and semantics.

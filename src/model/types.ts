@@ -29,6 +29,7 @@ export interface SnapshotWarningV1 {
 export interface GraphSnapshotV1 {
   readonly format: 'runtime-impact-graph/v0.1';
   readonly schemaFingerprint: string;
+  readonly metadataPolicy: SnapshotMetadataPolicyV1;
   readonly nodes: readonly NodeV1[];
   readonly edges: readonly EdgeV1[];
   readonly cycles: readonly (readonly string[])[];
@@ -44,6 +45,11 @@ export interface MetadataRule {
 }
 
 export type MetadataSchema = Readonly<Record<string, MetadataRule>>;
+
+export interface SnapshotMetadataPolicyV1 {
+  readonly schema: MetadataSchema;
+  readonly sha256SaltFingerprint?: string;
+}
 
 export type EdgeMetadata = Readonly<Record<string, never>>;
 

@@ -39,9 +39,15 @@ type EdgeV1 = {
   observations: number;
 };
 
+type SnapshotMetadataPolicyV1 = {
+  schema: MetadataSchema;
+  sha256SaltFingerprint?: string;
+};
+
 type GraphSnapshotV1 = {
   format: 'runtime-impact-graph/v0.1';
   schemaFingerprint: string;
+  metadataPolicy: SnapshotMetadataPolicyV1;
   nodes: readonly NodeV1[];
   edges: readonly EdgeV1[];
   cycles: readonly (readonly string[])[];
@@ -100,15 +106,15 @@ Rules:
 
 ### 4.1 Canonical order and serialization
 
-Canonical JSON uses UTF-8, no insignificant whitespace, a fixed field order exactly as in `GraphSnapshotV1`, and a local bytewise Unicode code-point comparator (not `localeCompare`). Nodes sort by `id`; edges by `from`, then `to`, then `kind`; metadata keys sort by the same comparator; string-array metadata sorts and deduplicates before serialization; cycles sort by first ID then lexicographically by their full member list. Numbers must be finite safe integers where a count is expected and finite JSON numbers in metadata. Serialization rejects `NaN`, infinities, `-0`, `undefined`, bigint, functions, symbols and object values.
+Canonical JSON uses UTF-8, no insignificant whitespace, a fixed field order exactly as in `GraphSnapshotV1`, and a local bytewise Unicode code-point comparator (not `localeCompare`). The metadata policy schema and its rule fields are canonicalized before the graph fields. Nodes sort by `id`; edges by `from`, then `to`, then `kind`; metadata keys sort by the same comparator; string-array metadata sorts and deduplicates before serialization; cycles sort by first ID then lexicographically by their full member list. Numbers must be finite safe integers where a count is expected and finite JSON numbers in metadata. Serialization rejects `NaN`, infinities, `-0`, `undefined`, bigint, functions, symbols and object values.
 
-A same-version equivalent snapshot must produce byte-identical JSON regardless of registration, completion, or merge order. The `schemaFingerprint` is a SHA-256 digest of the canonical metadata-policy document, encoded as lowercase hexadecimal, so incompatible policy configurations cannot merge silently.
+A same-version equivalent snapshot must produce byte-identical JSON regardless of registration, completion, or merge order. Every snapshot carries its normalized `metadataPolicy`, making it self-contained across processes, workers, ESM/CJS module instances, and restarts. The `schemaFingerprint` is a SHA-256 digest of that canonical policy document, encoded as lowercase hexadecimal, so incompatible policy configurations cannot merge silently. When any rule uses `sha256`, the policy document also carries `sha256SaltFingerprint`, a domain-separated SHA-256 commitment to the salt; it never carries the salt itself. Thus identical schemas with different salts are incompatible rather than producing meaningless mixed digests.
 
 ### 4.2 Counts and merge
 
 `observations` starts at zero only internally and is at least one in a snapshot. A successful node scope or `observe` increments its node count once. A successfully admitted edge call increments that edge count once. The counter maximum is `Number.MAX_SAFE_INTEGER`; an increment or merge sum beyond that throws `CountOverflowError` without partial mutation.
 
-`mergeSnapshots` accepts a non-empty array with the same `format` and `schemaFingerprint`. It unions nodes by id and edges by key, sums counts exactly, merges metadata using the policy below, recomputes cycles, and canonically sorts the result. It is associative, commutative and idempotent only for an identical set of unique source snapshots; it is not a deduplicating transport protocol. Passing the same snapshot twice intentionally doubles observations. A caller that needs exactly-once ingestion must deduplicate outside this package using its own run identifier; v0.1 does not serialize run identifiers.
+`mergeSnapshots` accepts a non-empty array with the same `format` and `schemaFingerprint`. It independently normalizes every carried policy, recomputes its fingerprint, and validates every node's metadata against that policy before any reduction, including when the input array contains only one snapshot. Validation rejects undeclared keys, constant/set shape mismatches, wrong represented types, length or set-cardinality violations, invalid `drop`/`replace`/`sha256` representations, and custom nodes without a represented non-empty string `customKind`. The merger then unions nodes by id and edges by key, sums counts exactly, merges metadata using the carried policy below, recomputes cycles, and canonically sorts the result. It is associative, commutative and idempotent only for an identical set of unique source snapshots; it is not a deduplicating transport protocol. Passing the same snapshot twice intentionally doubles observations. A caller that needs exactly-once ingestion must deduplicate outside this package using its own run identifier; v0.1 does not serialize run identifiers.
 
 ### 4.3 Metadata safety contract
 
@@ -126,7 +132,7 @@ type MetadataRule = {
 
 The implementation must reject undeclared keys, keys longer than 64 characters, nested objects, arrays supplied by callers, non-finite numbers, strings beyond the rule limit, and metadata operations that would exceed a declared set cardinality. It must not include a rejected value in an error message, warning, or export.
 
-`constant` accepts a first value then requires byte-for-byte equality on every later observation and merge. `set` holds a sorted deduplicated set up to its required `maxDistinct`; all accepted values are rendered as arrays. Thus no policy depends on arrival order. `drop` removes the key before any cardinality accounting; `replace` stores the literal `"[REDACTED]"`; `sha256` stores a deterministic digest only when the graph has a caller-supplied non-empty salt kept out of snapshots and exports. The default `drop` is the safety posture. Hashing is not anonymization and is not suitable for low-entropy secrets or identifiers.
+`constant` accepts a first value then requires byte-for-byte equality on every later observation and merge. `set` holds a sorted deduplicated set up to its required `maxDistinct`; all accepted values are rendered as arrays. Thus no policy depends on arrival order. `drop` removes the value before any cardinality accounting; `replace` stores the literal `"[REDACTED]"`; `sha256` stores a deterministic HMAC digest only when the graph has a caller-supplied non-empty salt. The raw salt is never exported, but its one-way compatibility fingerprint is. The complete normalized policy, including declared key names, types, limits, and redaction modes, is exported in every snapshot so another process can validate and merge it without ambient registration. Policy key names are therefore public interchange metadata and must not themselves contain secrets. Use a high-entropy salt: hashing is not anonymization, the salt fingerprint permits offline salt guesses, and neither fingerprinting nor HMAC makes low-entropy secrets or identifiers safe to export.
 
 Graph limits default to 10,000 nodes and 50,000 aggregate edges per Graph. Limits are configurable downward only in v0.1. The default `onLimit` is `throw`; an explicit `onLimit: 'drop'` omits only the new node/edge, increments a fixed warning counter, and never records its identifier or metadata. This permits bounded best-effort demonstrations without leaking rejected values.
 
@@ -142,7 +148,7 @@ v0.1 is one dependency-free runtime package, with source boundaries rather than 
 - `src/internal/`: unexported helpers; consumers may not deep-import it.
 - `examples/`: neutral demonstration only; `bench/`: harness and raw result files; `test/`: unit, adversarial, concurrency and compatibility tests.
 
-The published package is ESM-first with `type: "module"`. Its `exports` field exposes only `.` and the documented pure formatter subpaths, using conditional `import`, `require`, and `types` targets. Node documents that `exports` encapsulates undeclared subpaths and that conditional exports can serve different `import` and `require` implementations.[7] ESM and CJS builds must be generated from the same TypeScript source and run the same contract suite; no mutable singleton may cross the boundary. The build must include `.d.ts` declarations.
+The published package is ESM-first with `type: "module"`. Its `exports` field exposes only `.` and the documented pure formatter subpaths, using conditional `import`, `require`, and `types` targets. Node documents that `exports` encapsulates undeclared subpaths and that conditional exports can serve different `import` and `require` implementations.[7] ESM and CJS builds must be generated from the same TypeScript source and run the same contract suite. Snapshot merge semantics must not depend on a mutable module-local registry: a snapshot created by ESM, CJS, a worker, or a previous process must be mergeable in a fresh module instance using only snapshot bytes. The build must include `.d.ts` declarations.
 
 Supported runtime matrix: Node.js 22.15.x and later 22.x releases, plus Node.js 24.x; no other runtime is promised in v0.1. Node recommends production applications use Active or Maintenance LTS releases.[2] The release schedule lists Node 22 support through 2027-04-30 and Node 24 through 2028-04-30.[6] Node 20, browser runtimes, edge isolates, Deno, Bun, and worker-thread propagation are explicitly unsupported. The version floor avoids relying on experimental AsyncLocalStorage helpers; v0.1 only needs stable `run` and `getStore` semantics.[1]
 
@@ -161,10 +167,10 @@ Formatters are pure: they must not mutate snapshots, consult ambient context, re
 Required automated tests before a release candidate:
 
 - unit tests for descriptor conflicts, edge aggregation, canonical ordering, DOT escaping, merge algebra, self loops, SCC ordering and count overflow;
-- adversarial metadata tests for undeclared keys, long strings, dynamic-id examples, nested values, cardinality exhaustion, redaction, hash salt non-export, and rejected-value non-disclosure;
+- adversarial metadata tests for undeclared keys, constant/set shape mismatches, wrong types, long strings, dynamic-id examples, nested values, cardinality exhaustion, redaction representations, custom-node requirements, different-salt incompatibility, raw hash-salt non-export, and rejected-value non-disclosure, including malformed singleton snapshots;
 - concurrency tests using at least two interleaved roots with nested promises and timers, proving no cross-root containment edges;
 - error tests proving context restoration after synchronous throw and async rejection;
-- ESM and CJS import/require smoke tests from a packed tarball on Node 22 and 24;
+- ESM and CJS import/require smoke tests from a packed tarball on Node 22 and 24, plus a fresh-process merge that created neither input graph;
 - golden tests that compare byte-for-byte canonical JSON from differently ordered equivalent executions and merges.
 
 Benchmarks are not production-safety proof. The harness records: package commit, Node full version, OS, CPU model, architecture, run date, exact command, warm-up count, measured iteration count, graph limits and metadata schema. It reports raw JSON plus median, p95 and mean elapsed time per operation, heap delta before/after an explicit GC-enabled run where available, and output bytes. It includes five scenarios: baseline callback, `graph.run` only, one `withNode`, ten nested nodes, and two interleaved roots with ten nodes each. Run five fresh processes per scenario after 1,000 warm-up operations and 100,000 measured operations; retain all raw samples. Compare against the same Node command without instrumentation and publish absolute times, not only percentages.

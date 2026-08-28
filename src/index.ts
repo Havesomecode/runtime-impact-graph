@@ -20,4 +20,5 @@ export type {
   NodeKind,
   NodeV1,
   SnapshotWarningV1,
+  SnapshotMetadataPolicyV1,
 } from './model/types.js';
