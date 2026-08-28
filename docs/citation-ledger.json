@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": 1,
+      "url": "https://nodejs.org/api/async_context.html",
+      "title": "",
+      "accessed": "2026-08-28"
+    },
+    {
+      "id": 2,
+      "url": "https://nodejs.org/en/about/previous-releases",
+      "title": "",
+      "accessed": "2026-08-28"
+    },
+    {
+      "id": 3,
+      "url": "https://opentelemetry.io/docs/concepts/signals/traces",
+      "title": "",
+      "accessed": "2026-08-28"
+    },
+    {
+      "id": 4,
+      "url": "https://github.com/pahen/madge",
+      "title": "",
+      "accessed": "2026-08-28"
+    },
+    {
+      "id": 5,
+      "url": "https://graphviz.org/doc/info/lang.html",
+      "title": "",
+      "accessed": "2026-08-28"
+    },
+    {
+      "id": 6,
+      "url": "https://github.com/nodejs/Release/blob/main/schedule.json",
+      "title": "",
+      "accessed": "2026-08-28"
+    },
+    {
+      "id": 7,
+      "url": "https://nodejs.org/api/packages.html",
+      "title": "",
+      "accessed": "2026-08-28"
+    },
+    {
+      "id": 8,
+      "url": "https://nodejs.org/api/test.html",
+      "title": "",
+      "accessed": "2026-08-28"
+    },
+    {
+      "id": 9,
+      "url": "https://mermaid.js.org/syntax/flowchart.html",
+      "title": "",
+      "accessed": "2026-08-28"
+    }
+  ]
+}
