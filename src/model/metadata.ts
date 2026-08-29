@@ -47,7 +47,7 @@ function sortedEntries(value: object): readonly (readonly [string, unknown])[] {
   );
 }
 
-function assertSafeKey(key: string): void {
+export function assertSafeMetadataKey(key: string): void {
   if (key.length === 0 || key.length > 64 || FORBIDDEN_KEYS.has(key)) {
     throw new TypeError(`Unsafe metadata key ${JSON.stringify(key)}.`);
   }
@@ -108,7 +108,7 @@ export function normalizeMetadataSchema(
   assertRecord(schema, 'metadataSchema');
   const normalized: Record<string, MetadataRule> = {};
   for (const [key, value] of sortedEntries(schema)) {
-    assertSafeKey(key);
+    assertSafeMetadataKey(key);
     normalized[key] = normalizeRule(value, key);
   }
   return Object.freeze(normalized);
@@ -200,7 +200,7 @@ export function processMetadata(
 
   const output: Record<string, MetadataValue | readonly MetadataValue[]> = {};
   for (const [key, value] of sortedEntries(input)) {
-    assertSafeKey(key);
+    assertSafeMetadataKey(key);
     const rule = schema[key];
     if (rule === undefined) {
       throw new TypeError(`Undeclared metadata key ${JSON.stringify(key)}.`);
@@ -273,14 +273,7 @@ export function validateSnapshotNodeMetadata(
 
   if (node.kind === 'custom') {
     const customKind = node.metadata.customKind;
-    const validCustomKind =
-      (typeof customKind === 'string' && customKind.length > 0) ||
-      (Array.isArray(customKind) &&
-        customKind.length > 0 &&
-        customKind.every(
-          (member) => typeof member === 'string' && member.length > 0,
-        ));
-    if (!validCustomKind) {
+    if (typeof customKind !== 'string' || customKind.length === 0) {
       throw new TypeError('Custom snapshot nodes require customKind metadata.');
     }
   }

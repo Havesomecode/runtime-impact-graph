@@ -68,21 +68,25 @@ export function mergeSnapshots(
   if (first === undefined)
     throw new TypeError('At least one snapshot is required.');
   const metadataSchema = first.metadataPolicy.schema;
+  const metadataPolicyIdentity = JSON.stringify(first.metadataPolicy);
+
+  for (const snapshot of canonicalSnapshots) {
+    if (
+      snapshot.format !== 'runtime-impact-graph/v0.1' ||
+      snapshot.schemaFingerprint !== first.schemaFingerprint ||
+      JSON.stringify(snapshot.metadataPolicy) !== metadataPolicyIdentity
+    ) {
+      throw new TypeError(
+        'Snapshots have incompatible format or metadata policy.',
+      );
+    }
+  }
 
   const nodes = new Map<string, NodeV1>();
   const edges = new Map<string, EdgeV1>();
   const warnings = new Map<SnapshotWarningV1['code'], number>();
 
   for (const snapshot of canonicalSnapshots) {
-    if (
-      snapshot.format !== 'runtime-impact-graph/v0.1' ||
-      snapshot.schemaFingerprint !== first.schemaFingerprint
-    ) {
-      throw new TypeError(
-        'Snapshots have incompatible format or metadata policy.',
-      );
-    }
-
     for (const node of snapshot.nodes) {
       if (!Number.isSafeInteger(node.observations) || node.observations < 1) {
         throw new TypeError(

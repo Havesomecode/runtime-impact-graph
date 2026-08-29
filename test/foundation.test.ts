@@ -4,11 +4,13 @@ import { describe, it } from 'node:test';
 import {
   createGraph,
   ContainmentCycleError,
+  CountOverflowError,
   mergeSnapshots,
   NoActiveExecutionError,
   toCanonicalJson,
   toDot,
 } from '../src/index.js';
+import { setGraphCountsForTest } from '../src/runtime/graph.js';
 
 describe('package foundation', () => {
   it('creates a versioned deterministic empty snapshot', () => {
@@ -165,6 +167,27 @@ describe('package foundation', () => {
       { from: 'c', to: 'c', kind: 'dependsOn', observations: 1 },
     ]);
     assert.deepEqual(graph.snapshot().cycles, [['a', 'b'], ['c']]);
+  });
+
+  it('requires reserved edge metadata to be an exact empty plain object', () => {
+    const invalidMetadata = [
+      { [Symbol('secret')]: true },
+      Object.create({ inherited: true }) as object,
+      new Map<string, string>(),
+    ];
+
+    for (const metadata of invalidMetadata) {
+      const graph = createGraph({ metadataSchema: {} });
+      graph.run(() => {
+        graph.observe({ id: 'a', kind: 'resource', label: 'A' });
+        graph.observe({ id: 'b', kind: 'resource', label: 'B' });
+        assert.throws(
+          () => graph.dependsOn('a', 'b', { metadata: metadata as never }),
+          TypeError,
+        );
+      });
+      assert.deepEqual(graph.snapshot().edges, []);
+    }
   });
 
   it('analyzes a valid default-capacity dependency chain without stack exhaustion', () => {
@@ -404,6 +427,97 @@ describe('package foundation', () => {
     assert.deepEqual(graph.snapshot().edges, [
       { from: 'a', to: 'b', kind: 'contains', observations: 1 },
     ]);
+  });
+
+  it('keeps withNode transactional when a containment count overflows', () => {
+    const graph = createGraph({
+      metadataSchema: {
+        tags: {
+          type: 'string',
+          mode: 'set',
+          maxDistinct: 2,
+          redact: 'none',
+        },
+      },
+    });
+    const parent = { id: 'parent', kind: 'route' as const, label: 'Parent' };
+    const child = {
+      id: 'child',
+      kind: 'resource' as const,
+      label: 'Child',
+      metadata: { tags: 'a' },
+    };
+    graph.run(() => {
+      graph.withNode(parent, () => graph.withNode(child, () => undefined));
+    });
+    setGraphCountsForTest(graph, {
+      edges: [
+        {
+          from: parent.id,
+          to: child.id,
+          kind: 'contains',
+          observations: Number.MAX_SAFE_INTEGER,
+        },
+      ],
+    });
+
+    graph.run(() => {
+      graph.withNode(parent, () => {
+        const before = structuredClone(graph.snapshot());
+        assert.throws(
+          () =>
+            graph.withNode(
+              { ...child, metadata: { tags: 'b' } },
+              () => undefined,
+            ),
+          CountOverflowError,
+        );
+        assert.deepEqual(graph.snapshot(), before);
+      });
+    });
+  });
+
+  it('keeps withNode transactional when a drop warning count overflows', () => {
+    const graph = createGraph({
+      maxEdges: 0,
+      metadataSchema: {
+        tags: {
+          type: 'string',
+          mode: 'set',
+          maxDistinct: 2,
+          redact: 'none',
+        },
+      },
+      onLimit: 'drop',
+    });
+    const parent = { id: 'parent', kind: 'route' as const, label: 'Parent' };
+    const child = {
+      id: 'child',
+      kind: 'resource' as const,
+      label: 'Child',
+      metadata: { tags: 'a' },
+    };
+    graph.run(() => {
+      graph.withNode(parent, () => graph.withNode(child, () => undefined));
+    });
+    setGraphCountsForTest(graph, {
+      warnings: { 'edge-limit': Number.MAX_SAFE_INTEGER },
+    });
+
+    graph.run(() => {
+      graph.withNode(parent, () => {
+        const before = structuredClone(graph.snapshot());
+        assert.throws(
+          () =>
+            graph.withNode(
+              { ...child, metadata: { tags: 'b' } },
+              () => undefined,
+            ),
+          CountOverflowError,
+        );
+        assert.deepEqual(graph.snapshot(), before);
+      });
+    });
   });
 
   it('drops over-limit nodes without retaining their identifiers', () => {

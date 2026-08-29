@@ -50,6 +50,15 @@ function hasControlCharacter(value: string): boolean {
   return false;
 }
 
+function assertEmptyPlainEdgeMetadata(value: EdgeMetadata): void {
+  if (
+    Object.getPrototypeOf(value) !== Object.prototype ||
+    Reflect.ownKeys(value).length > 0
+  ) {
+    throw new TypeError('Edge metadata is reserved and must be empty in v0.1.');
+  }
+}
+
 interface ExecutionContext {
   readonly graph: Graph;
   readonly stack: readonly string[];
@@ -68,6 +77,26 @@ interface MutableEdge {
   readonly to: string;
   readonly kind: EdgeV1['kind'];
   observations: number;
+}
+
+interface GraphCountOverridesForTest {
+  readonly nodes?: Readonly<Record<string, number>>;
+  readonly edges?: readonly (Pick<MutableEdge, 'from' | 'to' | 'kind'> & {
+    readonly observations: number;
+  })[];
+  readonly warnings?: Readonly<
+    Partial<Record<'node-limit' | 'edge-limit', number>>
+  >;
+}
+
+const SET_COUNTS_FOR_TEST = new WeakMap<
+  Graph,
+  (overrides: GraphCountOverridesForTest) => void
+>();
+
+interface PreparedNodeMutation {
+  readonly admitted: boolean;
+  readonly commit: () => void;
 }
 
 export class Graph {
@@ -105,6 +134,28 @@ export class Graph {
     if (this.#onLimit !== 'throw' && this.#onLimit !== 'drop') {
       throw new TypeError('onLimit must be "throw" or "drop".');
     }
+    SET_COUNTS_FOR_TEST.set(this, (overrides) => {
+      for (const [id, observations] of Object.entries(overrides.nodes ?? {})) {
+        const node = this.#nodes.get(id);
+        if (node === undefined) throw new Error('Test node does not exist.');
+        node.observations = observations;
+      }
+      for (const edgeOverride of overrides.edges ?? []) {
+        const key = JSON.stringify([
+          edgeOverride.from,
+          edgeOverride.to,
+          edgeOverride.kind,
+        ]);
+        const edge = this.#edges.get(key);
+        if (edge === undefined) throw new Error('Test edge does not exist.');
+        edge.observations = edgeOverride.observations;
+      }
+      for (const [code, count] of Object.entries(overrides.warnings ?? {})) {
+        if (count !== undefined) {
+          this.#warnings.set(code as 'node-limit' | 'edge-limit', count);
+        }
+      }
+    });
   }
 
   public run<T>(work: () => T | Promise<T>): T | Promise<T> {
@@ -126,20 +177,17 @@ export class Graph {
     ) {
       throw new ContainmentCycleError(descriptor.id);
     }
-    if (
-      parent !== undefined &&
-      this.#onLimit === 'throw' &&
-      !this.#edges.has(JSON.stringify([parent, descriptor.id, 'contains'])) &&
-      this.#edges.size >= this.#maxEdges
-    ) {
-      throw new RangeError('Graph cardinality limit exceeded.');
+    const nodeMutation = this.#prepareNodeMutation(descriptor);
+    if (!nodeMutation.admitted) {
+      nodeMutation.commit();
+      return work();
     }
-    const admitted = this.#recordNode(descriptor);
-    if (!admitted) return work();
-
-    if (parent !== undefined) {
-      this.#recordEdge(parent, descriptor.id, 'contains');
-    }
+    const edgeMutation =
+      parent === undefined
+        ? undefined
+        : this.#prepareEdgeMutation(parent, descriptor.id, 'contains');
+    nodeMutation.commit();
+    edgeMutation?.();
 
     return this.#storage.run(
       { graph: this, stack: [...context.stack, descriptor.id] },
@@ -149,7 +197,7 @@ export class Graph {
 
   public observe(descriptor: NodeDescriptor): void {
     this.#requireContext();
-    this.#recordNode(descriptor);
+    this.#prepareNodeMutation(descriptor).commit();
   }
 
   public dependsOn(
@@ -158,18 +206,13 @@ export class Graph {
     options?: { readonly metadata?: EdgeMetadata },
   ): void {
     this.#requireContext();
-    if (
-      options?.metadata !== undefined &&
-      Object.keys(options.metadata).length > 0
-    ) {
-      throw new TypeError(
-        'Edge metadata is reserved and must be empty in v0.1.',
-      );
+    if (options?.metadata !== undefined) {
+      assertEmptyPlainEdgeMetadata(options.metadata);
     }
     if (!this.#nodes.has(fromId) || !this.#nodes.has(toId)) {
       throw new Error('Both dependency nodes must already be registered.');
     }
-    this.#recordEdge(fromId, toId, 'dependsOn');
+    this.#prepareEdgeMutation(fromId, toId, 'dependsOn')();
   }
 
   public snapshot(): GraphSnapshotV1 {
@@ -207,7 +250,7 @@ export class Graph {
     return context;
   }
 
-  #recordNode(descriptor: NodeDescriptor): boolean {
+  #prepareNodeMutation(descriptor: NodeDescriptor): PreparedNodeMutation {
     if (
       typeof descriptor.id !== 'string' ||
       typeof descriptor.label !== 'string' ||
@@ -222,7 +265,10 @@ export class Graph {
     }
     const existing = this.#nodes.get(descriptor.id);
     if (existing === undefined && this.#nodes.size >= this.#maxNodes) {
-      return this.#handleLimit('node-limit');
+      return {
+        admitted: false,
+        commit: this.#prepareLimitMutation('node-limit'),
+      };
     }
     if (
       descriptor.kind === 'custom' &&
@@ -249,14 +295,18 @@ export class Graph {
       this.#metadataSchema,
     );
     if (existing === undefined) {
-      this.#nodes.set(descriptor.id, {
-        id: descriptor.id,
-        kind: descriptor.kind,
-        label: descriptor.label,
-        metadata,
-        observations: 1,
-      });
-      return true;
+      return {
+        admitted: true,
+        commit: () => {
+          this.#nodes.set(descriptor.id, {
+            id: descriptor.id,
+            kind: descriptor.kind,
+            label: descriptor.label,
+            metadata,
+            observations: 1,
+          });
+        },
+      };
     }
 
     if (
@@ -273,40 +323,51 @@ export class Graph {
     if (existing.observations === Number.MAX_SAFE_INTEGER) {
       throw new CountOverflowError();
     }
-    existing.metadata = mergedMetadata;
-    existing.observations += 1;
-    return true;
+    return {
+      admitted: true,
+      commit: () => {
+        existing.metadata = mergedMetadata;
+        existing.observations += 1;
+      },
+    };
   }
 
-  #recordEdge(from: string, to: string, kind: EdgeV1['kind']): void {
+  #prepareEdgeMutation(
+    from: string,
+    to: string,
+    kind: EdgeV1['kind'],
+  ): () => void {
     const key = JSON.stringify([from, to, kind]);
     const existing = this.#edges.get(key);
     if (existing === undefined) {
       if (this.#edges.size >= this.#maxEdges) {
-        this.#handleLimit('edge-limit');
-        return;
+        return this.#prepareLimitMutation('edge-limit');
       }
       if (kind === 'contains' && this.#closesContainmentCycle(from, to)) {
         throw new ContainmentCycleError(to);
       }
-      this.#edges.set(key, { from, to, kind, observations: 1 });
-      return;
+      return () => {
+        this.#edges.set(key, { from, to, kind, observations: 1 });
+      };
     }
 
     if (existing.observations === Number.MAX_SAFE_INTEGER) {
       throw new CountOverflowError();
     }
-    existing.observations += 1;
+    return () => {
+      existing.observations += 1;
+    };
   }
 
-  #handleLimit(code: 'node-limit' | 'edge-limit'): false {
+  #prepareLimitMutation(code: 'node-limit' | 'edge-limit'): () => void {
     if (this.#onLimit === 'throw') {
       throw new RangeError('Configured graph cardinality limit exceeded.');
     }
     const count = this.#warnings.get(code) ?? 0;
     if (count === Number.MAX_SAFE_INTEGER) throw new CountOverflowError();
-    this.#warnings.set(code, count + 1);
-    return false;
+    return () => {
+      this.#warnings.set(code, count + 1);
+    };
   }
 
   #closesContainmentCycle(from: string, to: string): boolean {
@@ -344,4 +405,14 @@ export class Graph {
 
 export function createGraph(options: GraphOptions): Graph {
   return new Graph(options);
+}
+
+export function setGraphCountsForTest(
+  graph: Graph,
+  overrides: GraphCountOverridesForTest,
+): void {
+  const setCounts = SET_COUNTS_FOR_TEST.get(graph);
+  if (setCounts === undefined)
+    throw new Error('Graph test seam is unavailable.');
+  setCounts(overrides);
 }

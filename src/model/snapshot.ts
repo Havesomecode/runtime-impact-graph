@@ -1,5 +1,7 @@
 import { compareCanonical } from './canonical.js';
+import { findDependencyCycles, hasContainmentCycle } from './cycles.js';
 import {
+  assertSafeMetadataKey,
   fingerprintMetadataPolicy,
   normalizeMetadataSchema,
   validateSnapshotNodeMetadata,
@@ -24,6 +26,26 @@ const NODE_KINDS = new Set<NodeKind>([
   'custom',
 ]);
 const EDGE_KINDS = new Set<EdgeKind>(['contains', 'dependsOn']);
+
+function assertAllowedKeys(
+  value: Record<string, unknown>,
+  name: string,
+  allowedKeys: readonly string[],
+): void {
+  const allowed = new Set(allowedKeys);
+  for (const [key, descriptor] of Object.entries(
+    Object.getOwnPropertyDescriptors(value),
+  )) {
+    if (!allowed.has(key)) {
+      throw new TypeError(`${name} contains an unknown property.`);
+    }
+    if (!descriptor.enumerable || !('value' in descriptor)) {
+      throw new TypeError(
+        `${name} properties must be enumerable data properties.`,
+      );
+    }
+  }
+}
 
 function hasControlCharacter(value: string): boolean {
   for (const character of value) {
@@ -89,10 +111,25 @@ function compareMetadataValue(
 
 function canonicalMetadata(value: unknown): NodeV1['metadata'] {
   assertRecord(value, 'Node metadata');
-  const output: Record<string, MetadataValue | readonly MetadataValue[]> = {};
-  const keys = Object.keys(value).sort(compareCanonical);
+  const output = Object.create(null) as Record<
+    string,
+    MetadataValue | readonly MetadataValue[]
+  >;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Object.keys(descriptors).sort(compareCanonical);
   for (const key of keys) {
-    const item = value[key];
+    assertSafeMetadataKey(key);
+    const descriptor = descriptors[key];
+    if (
+      descriptor === undefined ||
+      !descriptor.enumerable ||
+      !('value' in descriptor)
+    ) {
+      throw new TypeError(
+        'Node metadata properties must be enumerable data properties.',
+      );
+    }
+    const item: unknown = descriptor.value;
     if (Array.isArray(item)) {
       if (item.length === 0)
         throw new TypeError('Metadata sets cannot be empty.');
@@ -114,6 +151,13 @@ function canonicalMetadata(value: unknown): NodeV1['metadata'] {
 
 function canonicalNode(value: unknown): NodeV1 {
   assertRecord(value, 'Snapshot node');
+  assertAllowedKeys(value, 'Snapshot node', [
+    'id',
+    'kind',
+    'label',
+    'metadata',
+    'observations',
+  ]);
   if (
     typeof value.id !== 'string' ||
     value.id.length === 0 ||
@@ -138,6 +182,12 @@ function canonicalNode(value: unknown): NodeV1 {
 
 function canonicalEdge(value: unknown): EdgeV1 {
   assertRecord(value, 'Snapshot edge');
+  assertAllowedKeys(value, 'Snapshot edge', [
+    'from',
+    'to',
+    'kind',
+    'observations',
+  ]);
   if (
     typeof value.from !== 'string' ||
     typeof value.to !== 'string' ||
@@ -171,6 +221,7 @@ function compareCycles(
 
 function canonicalWarning(value: unknown): SnapshotWarningV1 {
   assertRecord(value, 'Snapshot warning');
+  assertAllowedKeys(value, 'Snapshot warning', ['code', 'count']);
   if (value.code !== 'node-limit' && value.code !== 'edge-limit') {
     throw new TypeError('Snapshot warning code is invalid.');
   }
@@ -180,10 +231,10 @@ function canonicalWarning(value: unknown): SnapshotWarningV1 {
 
 function canonicalMetadataPolicy(value: unknown): SnapshotMetadataPolicyV1 {
   assertRecord(value, 'Snapshot metadata policy');
-  const allowedKeys = new Set(['schema', 'sha256SaltFingerprint']);
-  if (Object.keys(value).some((key) => !allowedKeys.has(key))) {
-    throw new TypeError('Snapshot metadata policy is invalid.');
-  }
+  assertAllowedKeys(value, 'Snapshot metadata policy', [
+    'schema',
+    'sha256SaltFingerprint',
+  ]);
   const schema = normalizeMetadataSchema(value.schema as never);
   const usesSha256 = Object.values(schema).some(
     (rule) => rule.redact === 'sha256',
@@ -206,6 +257,15 @@ function canonicalMetadataPolicy(value: unknown): SnapshotMetadataPolicyV1 {
 
 export function canonicalizeSnapshot(value: unknown): GraphSnapshotV1 {
   assertRecord(value, 'Snapshot');
+  assertAllowedKeys(value, 'Snapshot', [
+    'format',
+    'schemaFingerprint',
+    'metadataPolicy',
+    'nodes',
+    'edges',
+    'cycles',
+    'warnings',
+  ]);
   if (
     value.format !== 'runtime-impact-graph/v0.1' ||
     typeof value.schemaFingerprint !== 'string' ||
@@ -248,6 +308,14 @@ export function canonicalizeSnapshot(value: unknown): GraphSnapshotV1 {
   if (edges.some((edge) => !nodeIds.has(edge.from) || !nodeIds.has(edge.to))) {
     throw new TypeError('Snapshot edge references an unknown node.');
   }
+  if (
+    hasContainmentCycle(
+      nodes.map((node) => node.id),
+      edges,
+    )
+  ) {
+    throw new TypeError('Snapshot contains a containment cycle.');
+  }
 
   const cycles = value.cycles
     .map((cycle) => {
@@ -267,6 +335,18 @@ export function canonicalizeSnapshot(value: unknown): GraphSnapshotV1 {
       return sorted;
     })
     .sort(compareCycles);
+  if (
+    new Set(cycles.map((cycle) => JSON.stringify(cycle))).size !== cycles.length
+  ) {
+    throw new TypeError('Duplicate snapshot cycle.');
+  }
+  const expectedCycles = findDependencyCycles(
+    nodes.map((node) => node.id),
+    edges,
+  );
+  if (JSON.stringify(cycles) !== JSON.stringify(expectedCycles)) {
+    throw new TypeError('Snapshot cycles do not match dependency edges.');
+  }
 
   const warnings = value.warnings
     .map(canonicalWarning)
