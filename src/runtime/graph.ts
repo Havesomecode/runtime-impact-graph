@@ -50,6 +50,23 @@ function hasControlCharacter(value: string): boolean {
   return false;
 }
 
+interface CapturedNodeDescriptor {
+  readonly id: NodeDescriptor['id'];
+  readonly kind: NodeDescriptor['kind'];
+  readonly label: NodeDescriptor['label'];
+  readonly metadata: NodeDescriptor['metadata'];
+}
+
+function captureNodeDescriptor(
+  descriptor: NodeDescriptor,
+): CapturedNodeDescriptor {
+  const id = descriptor.id;
+  const kind = descriptor.kind;
+  const label = descriptor.label;
+  const metadata = descriptor.metadata;
+  return Object.freeze({ id, kind, label, metadata });
+}
+
 function assertEmptyPlainEdgeMetadata(value: EdgeMetadata): void {
   if (
     Object.getPrototypeOf(value) !== Object.prototype ||
@@ -167,17 +184,18 @@ export class Graph {
     work: () => T | Promise<T>,
   ): T | Promise<T> {
     const context = this.#requireContext();
-    if (context.stack.includes(descriptor.id)) {
-      throw new ContainmentCycleError(descriptor.id);
+    const captured = captureNodeDescriptor(descriptor);
+    if (context.stack.includes(captured.id)) {
+      throw new ContainmentCycleError(captured.id);
     }
     const parent = context.stack.at(-1);
     if (
       parent !== undefined &&
-      this.#closesContainmentCycle(parent, descriptor.id)
+      this.#closesContainmentCycle(parent, captured.id)
     ) {
-      throw new ContainmentCycleError(descriptor.id);
+      throw new ContainmentCycleError(captured.id);
     }
-    const nodeMutation = this.#prepareNodeMutation(descriptor);
+    const nodeMutation = this.#prepareNodeMutation(captured);
     if (!nodeMutation.admitted) {
       nodeMutation.commit();
       return work();
@@ -185,19 +203,19 @@ export class Graph {
     const edgeMutation =
       parent === undefined
         ? undefined
-        : this.#prepareEdgeMutation(parent, descriptor.id, 'contains');
+        : this.#prepareEdgeMutation(parent, captured.id, 'contains');
     nodeMutation.commit();
     edgeMutation?.();
 
     return this.#storage.run(
-      { graph: this, stack: [...context.stack, descriptor.id] },
+      { graph: this, stack: [...context.stack, captured.id] },
       work,
     );
   }
 
   public observe(descriptor: NodeDescriptor): void {
     this.#requireContext();
-    this.#prepareNodeMutation(descriptor).commit();
+    this.#prepareNodeMutation(captureNodeDescriptor(descriptor)).commit();
   }
 
   public dependsOn(
@@ -250,7 +268,9 @@ export class Graph {
     return context;
   }
 
-  #prepareNodeMutation(descriptor: NodeDescriptor): PreparedNodeMutation {
+  #prepareNodeMutation(
+    descriptor: CapturedNodeDescriptor,
+  ): PreparedNodeMutation {
     if (
       typeof descriptor.id !== 'string' ||
       typeof descriptor.label !== 'string' ||
@@ -262,13 +282,6 @@ export class Graph {
       !NODE_KINDS.has(descriptor.kind)
     ) {
       throw new TypeError('Node id or label is invalid.');
-    }
-    const existing = this.#nodes.get(descriptor.id);
-    if (existing === undefined && this.#nodes.size >= this.#maxNodes) {
-      return {
-        admitted: false,
-        commit: this.#prepareLimitMutation('node-limit'),
-      };
     }
     if (
       descriptor.kind === 'custom' &&
@@ -294,6 +307,13 @@ export class Graph {
       },
       this.#metadataSchema,
     );
+    const existing = this.#nodes.get(descriptor.id);
+    if (existing === undefined && this.#nodes.size >= this.#maxNodes) {
+      return {
+        admitted: false,
+        commit: this.#prepareLimitMutation('node-limit'),
+      };
+    }
     if (existing === undefined) {
       return {
         admitted: true,

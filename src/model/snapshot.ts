@@ -266,10 +266,11 @@ export function canonicalizeSnapshot(value: unknown): GraphSnapshotV1 {
     'cycles',
     'warnings',
   ]);
+  const schemaFingerprint = value.schemaFingerprint;
   if (
     value.format !== 'runtime-impact-graph/v0.1' ||
-    typeof value.schemaFingerprint !== 'string' ||
-    !/^[0-9a-f]{64}$/u.test(value.schemaFingerprint) ||
+    typeof schemaFingerprint !== 'string' ||
+    !/^[0-9a-f]{64}$/u.test(schemaFingerprint) ||
     !Array.isArray(value.nodes) ||
     !Array.isArray(value.edges) ||
     !Array.isArray(value.cycles) ||
@@ -278,7 +279,8 @@ export function canonicalizeSnapshot(value: unknown): GraphSnapshotV1 {
     throw new TypeError('Snapshot envelope is invalid.');
   }
   const metadataPolicy = canonicalMetadataPolicy(value.metadataPolicy);
-  if (fingerprintMetadataPolicy(metadataPolicy) !== value.schemaFingerprint) {
+  const derivedSchemaFingerprint = fingerprintMetadataPolicy(metadataPolicy);
+  if (derivedSchemaFingerprint !== schemaFingerprint) {
     throw new TypeError('Snapshot metadata policy fingerprint is invalid.');
   }
 
@@ -359,7 +361,7 @@ export function canonicalizeSnapshot(value: unknown): GraphSnapshotV1 {
 
   return {
     format: 'runtime-impact-graph/v0.1',
-    schemaFingerprint: value.schemaFingerprint,
+    schemaFingerprint: derivedSchemaFingerprint,
     metadataPolicy,
     nodes,
     edges,

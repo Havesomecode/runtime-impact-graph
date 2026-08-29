@@ -124,7 +124,7 @@ describe('portable snapshot merge', () => {
     assert.doesNotMatch(JSON.stringify(second), /salt-two/u);
   });
 
-  it('compares normalized policies even when canonical fingerprints match', async () => {
+  it('rejects differing policies before a proxy can forge matching fingerprints', async () => {
     const { mergeSnapshots } = await import('../src/index.js');
     const first = createGraph({
       metadataSchema: {
@@ -160,6 +160,41 @@ describe('portable snapshot merge', () => {
         ]),
       /incompatible/u,
     );
+  });
+
+  it('rejects malformed and policy-mismatched snapshot fingerprints', async () => {
+    const { mergeSnapshots } = await import('../src/index.js');
+    const snapshot = createGraph({ metadataSchema: {} }).snapshot();
+
+    assert.throws(
+      () => mergeSnapshots([{ ...snapshot, schemaFingerprint: '' }]),
+      /envelope is invalid/u,
+    );
+    assert.throws(
+      () =>
+        mergeSnapshots([{ ...snapshot, schemaFingerprint: '0'.repeat(64) }]),
+      /policy fingerprint is invalid/u,
+    );
+  });
+
+  it('captures a snapshot fingerprint once before validation', async () => {
+    const { mergeSnapshots } = await import('../src/index.js');
+    const snapshot = createGraph({ metadataSchema: {} }).snapshot();
+    let reads = 0;
+    const changingFingerprint = new Proxy(snapshot, {
+      get: (target, property, receiver): unknown => {
+        if (property === 'schemaFingerprint') {
+          reads += 1;
+          return reads === 1 ? snapshot.schemaFingerprint : 'invalid';
+        }
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    });
+
+    const merged = mergeSnapshots([changingFingerprint]);
+
+    assert.equal(reads, 1);
+    assert.equal(merged.schemaFingerprint, snapshot.schemaFingerprint);
   });
 
   it('aborts count-overflow merges without mutating any input snapshot', async () => {

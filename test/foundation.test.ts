@@ -149,6 +149,160 @@ describe('package foundation', () => {
     assert.deepEqual(graph.snapshot().nodes, []);
   });
 
+  it('captures every descriptor scalar field exactly once', () => {
+    const cases = [
+      { field: 'id', valid: 'safe', invalid: 'unsafe\u0000' },
+      { field: 'kind', valid: 'resource', invalid: 'invalid' },
+      { field: 'label', valid: 'Safe', invalid: '' },
+    ] as const;
+
+    for (const testCase of cases) {
+      const graph = createGraph({ metadataSchema: {} });
+      const descriptor: Record<string, unknown> = {
+        id: 'safe',
+        kind: 'resource',
+        label: 'Safe',
+      };
+      let reads = 0;
+      Object.defineProperty(descriptor, testCase.field, {
+        enumerable: true,
+        get: () => {
+          reads += 1;
+          return reads === 1 ? testCase.valid : testCase.invalid;
+        },
+      });
+
+      graph.run(() => graph.observe(descriptor as never));
+
+      assert.equal(reads, 1, `${testCase.field} read count`);
+      assert.equal(graph.snapshot().nodes[0]?.[testCase.field], testCase.valid);
+    }
+
+    const graph = createGraph({
+      metadataSchema: {
+        customKind: { type: 'string', mode: 'constant', redact: 'none' },
+      },
+    });
+    const validMetadata = { customKind: 'plugin' };
+    let metadataReads = 0;
+    const descriptor: Record<string, unknown> = {
+      id: 'custom',
+      kind: 'custom',
+      label: 'Custom',
+    };
+    Object.defineProperty(descriptor, 'metadata', {
+      enumerable: true,
+      get: () => {
+        metadataReads += 1;
+        return metadataReads === 1 ? validMetadata : { customKind: 7 };
+      },
+    });
+
+    graph.run(() => graph.observe(descriptor as never));
+
+    assert.equal(metadataReads, 1, 'metadata read count');
+    assert.equal(graph.snapshot().nodes[0]?.metadata.customKind, 'plugin');
+  });
+
+  it('pins absent metadata against prototype-chain injection', () => {
+    const graph = createGraph({
+      metadataSchema: {
+        tag: { type: 'string', mode: 'constant', redact: 'none' },
+      },
+    });
+    const previous = Object.getOwnPropertyDescriptor(
+      Object.prototype,
+      'metadata',
+    );
+    let reads = 0;
+    let capturedMetadata: unknown;
+    try {
+      Object.defineProperty(Object.prototype, 'metadata', {
+        configurable: true,
+        get: () => {
+          reads += 1;
+          return reads === 1 ? undefined : { tag: 'injected' };
+        },
+      });
+      graph.run(() => {
+        graph.observe({ id: 'resource', kind: 'resource', label: 'Resource' });
+      });
+      capturedMetadata = graph.snapshot().nodes[0]?.metadata;
+    } finally {
+      if (previous === undefined) {
+        Reflect.deleteProperty(Object.prototype, 'metadata');
+      } else {
+        Object.defineProperty(Object.prototype, 'metadata', previous);
+      }
+    }
+
+    assert.equal(reads, 1);
+    assert.deepEqual(capturedMetadata, {});
+  });
+
+  it('keeps captured withNode identifiers consistent through nested work', () => {
+    const graph = createGraph({ metadataSchema: {} });
+    let reads = 0;
+    const descriptor: Record<string, unknown> = {
+      kind: 'route',
+      label: 'Route',
+    };
+    Object.defineProperty(descriptor, 'id', {
+      enumerable: true,
+      get: () => {
+        reads += 1;
+        return reads === 1 ? 'route' : 'unsafe\u0000';
+      },
+    });
+
+    graph.run(() => {
+      graph.withNode(descriptor as never, () => {
+        graph.withNode(
+          { id: 'child', kind: 'resource', label: 'Child' },
+          () => undefined,
+        );
+      });
+    });
+
+    assert.equal(reads, 1);
+    assert.deepEqual(graph.snapshot().edges, [
+      { from: 'route', to: 'child', kind: 'contains', observations: 1 },
+    ]);
+  });
+
+  it('rejects changing custom metadata proxies before mutation', () => {
+    const graph = createGraph({
+      metadataSchema: {
+        customKind: { type: 'string', mode: 'constant', redact: 'none' },
+      },
+    });
+    let reads = 0;
+    const metadata = new Proxy(
+      { customKind: 'plugin' },
+      {
+        get: (target, property, receiver): unknown => {
+          if (property === 'customKind') {
+            reads += 1;
+            return reads === 1 ? 'plugin' : 7;
+          }
+          return Reflect.get(target, property, receiver) as unknown;
+        },
+      },
+    );
+
+    assert.throws(() => {
+      graph.run(() => {
+        graph.observe({
+          id: 'custom',
+          kind: 'custom',
+          label: 'Custom',
+          metadata,
+        });
+      });
+    }, TypeError);
+    assert.deepEqual(graph.snapshot().nodes, []);
+  });
+
   it('records explicit dependencies and reports their strongly connected components', () => {
     const graph = createGraph({ metadataSchema: {} });
 
@@ -518,6 +672,43 @@ describe('package foundation', () => {
         assert.deepEqual(graph.snapshot(), before);
       });
     });
+  });
+
+  it('rechecks node capacity after metadata reentrancy before commit', () => {
+    const graph = createGraph({
+      maxNodes: 1,
+      metadataSchema: {
+        customKind: { type: 'string', mode: 'constant', redact: 'none' },
+      },
+    });
+    let reentered = false;
+    const metadata = new Proxy(
+      { customKind: 'plugin' },
+      {
+        get: (target, property, receiver): unknown => {
+          if (property === 'customKind' && !reentered) {
+            reentered = true;
+            graph.observe({ id: 'nested', kind: 'resource', label: 'Nested' });
+          }
+          return Reflect.get(target, property, receiver) as unknown;
+        },
+      },
+    );
+
+    assert.throws(() => {
+      graph.run(() => {
+        graph.observe({
+          id: 'outer',
+          kind: 'custom',
+          label: 'Outer',
+          metadata,
+        });
+      });
+    }, RangeError);
+    assert.deepEqual(
+      graph.snapshot().nodes.map((node) => node.id),
+      ['nested'],
+    );
   });
 
   it('drops over-limit nodes without retaining their identifiers', () => {
