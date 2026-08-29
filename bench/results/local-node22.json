@@ -1,8 +1,8 @@
 {
   "format": "runtime-impact-graph/benchmark-v0.1",
-  "runDate": "2026-08-29T14:23:51.597Z",
-  "packageCommit": "f03b2db8d10f6f49dc2cd5ff6881fc5eaac94991",
-  "dirty": true,
+  "runDate": "2026-08-29T14:25:42.931Z",
+  "packageCommit": "16775ea2085aad67fa728ae257ce4fe7370b37f4",
+  "dirty": false,
   "command": "npm run benchmark",
   "warmupIterations": 1000,
   "measuredIterations": 100000,
@@ -29,11 +29,11 @@
         {
           "processIndex": 1,
           "scenario": "baseline-callback",
-          "elapsedNanoseconds": 1414625,
-          "nanosecondsPerOperation": 14.14625,
-          "heapBeforeBytes": 7308624,
-          "heapAfterBytes": 7300512,
-          "heapDeltaBytes": -8112,
+          "elapsedNanoseconds": 1819333,
+          "nanosecondsPerOperation": 18.19333,
+          "heapBeforeBytes": 7176696,
+          "heapAfterBytes": 7169304,
+          "heapDeltaBytes": -7392,
           "outputBytes": 0,
           "explicitGc": true,
           "sink": 101000
@@ -41,10 +41,10 @@
         {
           "processIndex": 2,
           "scenario": "baseline-callback",
-          "elapsedNanoseconds": 1105583,
-          "nanosecondsPerOperation": 11.05583,
-          "heapBeforeBytes": 7176248,
-          "heapAfterBytes": 7168904,
+          "elapsedNanoseconds": 3589166,
+          "nanosecondsPerOperation": 35.89166,
+          "heapBeforeBytes": 7176616,
+          "heapAfterBytes": 7169272,
           "heapDeltaBytes": -7344,
           "outputBytes": 0,
           "explicitGc": true,
@@ -53,11 +53,11 @@
         {
           "processIndex": 3,
           "scenario": "baseline-callback",
-          "elapsedNanoseconds": 1079500,
-          "nanosecondsPerOperation": 10.795,
-          "heapBeforeBytes": 7176120,
-          "heapAfterBytes": 7168728,
-          "heapDeltaBytes": -7392,
+          "elapsedNanoseconds": 2546208,
+          "nanosecondsPerOperation": 25.46208,
+          "heapBeforeBytes": 7176624,
+          "heapAfterBytes": 7169280,
+          "heapDeltaBytes": -7344,
           "outputBytes": 0,
           "explicitGc": true,
           "sink": 101000
@@ -65,10 +65,10 @@
         {
           "processIndex": 4,
           "scenario": "baseline-callback",
-          "elapsedNanoseconds": 1095666,
-          "nanosecondsPerOperation": 10.95666,
-          "heapBeforeBytes": 7176144,
-          "heapAfterBytes": 7168752,
+          "elapsedNanoseconds": 4028708,
+          "nanosecondsPerOperation": 40.28708,
+          "heapBeforeBytes": 7176664,
+          "heapAfterBytes": 7169272,
           "heapDeltaBytes": -7392,
           "outputBytes": 0,
           "explicitGc": true,
@@ -77,20 +77,20 @@
         {
           "processIndex": 5,
           "scenario": "baseline-callback",
-          "elapsedNanoseconds": 1138250,
-          "nanosecondsPerOperation": 11.3825,
-          "heapBeforeBytes": 7176048,
-          "heapAfterBytes": 7168656,
-          "heapDeltaBytes": -7392,
+          "elapsedNanoseconds": 8115500,
+          "nanosecondsPerOperation": 81.155,
+          "heapBeforeBytes": 7176272,
+          "heapAfterBytes": 7169272,
+          "heapDeltaBytes": -7000,
           "outputBytes": 0,
           "explicitGc": true,
           "sink": 101000
         }
       ],
       "summary": {
-        "medianNanosecondsPerOperation": 11.05583,
-        "p95NanosecondsPerOperation": 14.14625,
-        "meanNanosecondsPerOperation": 11.667248
+        "medianNanosecondsPerOperation": 35.89166,
+        "p95NanosecondsPerOperation": 81.155,
+        "meanNanosecondsPerOperation": 40.197829999999996
       }
     },
     {
@@ -100,11 +100,11 @@
         {
           "processIndex": 1,
           "scenario": "graph-run",
-          "elapsedNanoseconds": 6192959,
-          "nanosecondsPerOperation": 61.92959,
-          "heapBeforeBytes": 7199496,
-          "heapAfterBytes": 7205616,
-          "heapDeltaBytes": 6120,
+          "elapsedNanoseconds": 26061500,
+          "nanosecondsPerOperation": 260.615,
+          "heapBeforeBytes": 7200416,
+          "heapAfterBytes": 7206496,
+          "heapDeltaBytes": 6080,
           "outputBytes": 205,
           "explicitGc": true,
           "sink": 101000
@@ -112,11 +112,11 @@
         {
           "processIndex": 2,
           "scenario": "graph-run",
-          "elapsedNanoseconds": 5667000,
-          "nanosecondsPerOperation": 56.67,
-          "heapBeforeBytes": 7199784,
-          "heapAfterBytes": 7205528,
-          "heapDeltaBytes": 5744,
+          "elapsedNanoseconds": 16674583,
+          "nanosecondsPerOperation": 166.74583,
+          "heapBeforeBytes": 7199720,
+          "heapAfterBytes": 7214096,
+          "heapDeltaBytes": 14376,
           "outputBytes": 205,
           "explicitGc": true,
           "sink": 101000
@@ -124,11 +124,11 @@
         {
           "processIndex": 3,
           "scenario": "graph-run",
-          "elapsedNanoseconds": 5591791,
-          "nanosecondsPerOperation": 55.91791,
-          "heapBeforeBytes": 7199800,
-          "heapAfterBytes": 7205576,
-          "heapDeltaBytes": 5776,
+          "elapsedNanoseconds": 12123500,
+          "nanosecondsPerOperation": 121.235,
+          "heapBeforeBytes": 7200336,
+          "heapAfterBytes": 7205920,
+          "heapDeltaBytes": 5584,
           "outputBytes": 205,
           "explicitGc": true,
           "sink": 101000
@@ -136,11 +136,11 @@
         {
           "processIndex": 4,
           "scenario": "graph-run",
-          "elapsedNanoseconds": 5616417,
-          "nanosecondsPerOperation": 56.16417,
-          "heapBeforeBytes": 7199736,
-          "heapAfterBytes": 7205456,
-          "heapDeltaBytes": 5720,
+          "elapsedNanoseconds": 10768542,
+          "nanosecondsPerOperation": 107.68542,
+          "heapBeforeBytes": 7200104,
+          "heapAfterBytes": 7206224,
+          "heapDeltaBytes": 6120,
           "outputBytes": 205,
           "explicitGc": true,
           "sink": 101000
@@ -148,10 +148,10 @@
         {
           "processIndex": 5,
           "scenario": "graph-run",
-          "elapsedNanoseconds": 5660583,
-          "nanosecondsPerOperation": 56.60583,
-          "heapBeforeBytes": 7199872,
-          "heapAfterBytes": 7205640,
+          "elapsedNanoseconds": 25032209,
+          "nanosecondsPerOperation": 250.32209,
+          "heapBeforeBytes": 7200384,
+          "heapAfterBytes": 7206152,
           "heapDeltaBytes": 5768,
           "outputBytes": 205,
           "explicitGc": true,
@@ -159,9 +159,9 @@
         }
       ],
       "summary": {
-        "medianNanosecondsPerOperation": 56.60583,
-        "p95NanosecondsPerOperation": 61.92959,
-        "meanNanosecondsPerOperation": 57.4575
+        "medianNanosecondsPerOperation": 166.74583,
+        "p95NanosecondsPerOperation": 260.615,
+        "meanNanosecondsPerOperation": 181.320668
       }
     },
     {
@@ -171,11 +171,11 @@
         {
           "processIndex": 1,
           "scenario": "one-node",
-          "elapsedNanoseconds": 63110167,
-          "nanosecondsPerOperation": 631.10167,
-          "heapBeforeBytes": 7246264,
-          "heapAfterBytes": 7285712,
-          "heapDeltaBytes": 39448,
+          "elapsedNanoseconds": 176642375,
+          "nanosecondsPerOperation": 1766.42375,
+          "heapBeforeBytes": 7246848,
+          "heapAfterBytes": 7286200,
+          "heapDeltaBytes": 39352,
           "outputBytes": 319,
           "explicitGc": true,
           "sink": 101000
@@ -183,11 +183,11 @@
         {
           "processIndex": 2,
           "scenario": "one-node",
-          "elapsedNanoseconds": 74513541,
-          "nanosecondsPerOperation": 745.13541,
-          "heapBeforeBytes": 7246312,
-          "heapAfterBytes": 7285704,
-          "heapDeltaBytes": 39392,
+          "elapsedNanoseconds": 278719625,
+          "nanosecondsPerOperation": 2787.19625,
+          "heapBeforeBytes": 7246840,
+          "heapAfterBytes": 7286280,
+          "heapDeltaBytes": 39440,
           "outputBytes": 319,
           "explicitGc": true,
           "sink": 101000
@@ -195,11 +195,11 @@
         {
           "processIndex": 3,
           "scenario": "one-node",
-          "elapsedNanoseconds": 76669250,
-          "nanosecondsPerOperation": 766.6925,
-          "heapBeforeBytes": 7246192,
-          "heapAfterBytes": 7285640,
-          "heapDeltaBytes": 39448,
+          "elapsedNanoseconds": 248824542,
+          "nanosecondsPerOperation": 2488.24542,
+          "heapBeforeBytes": 7246840,
+          "heapAfterBytes": 7287456,
+          "heapDeltaBytes": 40616,
           "outputBytes": 319,
           "explicitGc": true,
           "sink": 101000
@@ -207,11 +207,11 @@
         {
           "processIndex": 4,
           "scenario": "one-node",
-          "elapsedNanoseconds": 70785250,
-          "nanosecondsPerOperation": 707.8525,
-          "heapBeforeBytes": 7246312,
-          "heapAfterBytes": 7285784,
-          "heapDeltaBytes": 39472,
+          "elapsedNanoseconds": 231853709,
+          "nanosecondsPerOperation": 2318.53709,
+          "heapBeforeBytes": 7246776,
+          "heapAfterBytes": 7286200,
+          "heapDeltaBytes": 39424,
           "outputBytes": 319,
           "explicitGc": true,
           "sink": 101000
@@ -219,20 +219,20 @@
         {
           "processIndex": 5,
           "scenario": "one-node",
-          "elapsedNanoseconds": 67872375,
-          "nanosecondsPerOperation": 678.72375,
-          "heapBeforeBytes": 7245912,
-          "heapAfterBytes": 7285736,
-          "heapDeltaBytes": 39824,
+          "elapsedNanoseconds": 262632500,
+          "nanosecondsPerOperation": 2626.325,
+          "heapBeforeBytes": 7246752,
+          "heapAfterBytes": 7287368,
+          "heapDeltaBytes": 40616,
           "outputBytes": 319,
           "explicitGc": true,
           "sink": 101000
         }
       ],
       "summary": {
-        "medianNanosecondsPerOperation": 707.8525,
-        "p95NanosecondsPerOperation": 766.6925,
-        "meanNanosecondsPerOperation": 705.901166
+        "medianNanosecondsPerOperation": 2488.24542,
+        "p95NanosecondsPerOperation": 2787.19625,
+        "meanNanosecondsPerOperation": 2397.345502
       }
     },
     {
@@ -242,11 +242,11 @@
         {
           "processIndex": 1,
           "scenario": "ten-nested-nodes",
-          "elapsedNanoseconds": 1309052167,
-          "nanosecondsPerOperation": 13090.52167,
-          "heapBeforeBytes": 7317264,
-          "heapAfterBytes": 7332320,
-          "heapDeltaBytes": 15056,
+          "elapsedNanoseconds": 4615893833,
+          "nanosecondsPerOperation": 46158.93833,
+          "heapBeforeBytes": 7318592,
+          "heapAfterBytes": 7331976,
+          "heapDeltaBytes": 13384,
           "outputBytes": 2236,
           "explicitGc": true,
           "sink": 101000
@@ -254,11 +254,11 @@
         {
           "processIndex": 2,
           "scenario": "ten-nested-nodes",
-          "elapsedNanoseconds": 1268394667,
-          "nanosecondsPerOperation": 12683.94667,
-          "heapBeforeBytes": 7318104,
-          "heapAfterBytes": 7331424,
-          "heapDeltaBytes": 13320,
+          "elapsedNanoseconds": 1721169917,
+          "nanosecondsPerOperation": 17211.69917,
+          "heapBeforeBytes": 7318176,
+          "heapAfterBytes": 7331984,
+          "heapDeltaBytes": 13808,
           "outputBytes": 2236,
           "explicitGc": true,
           "sink": 101000
@@ -266,11 +266,11 @@
         {
           "processIndex": 3,
           "scenario": "ten-nested-nodes",
-          "elapsedNanoseconds": 1322848459,
-          "nanosecondsPerOperation": 13228.48459,
-          "heapBeforeBytes": 7317464,
-          "heapAfterBytes": 7332432,
-          "heapDeltaBytes": 14968,
+          "elapsedNanoseconds": 2181777708,
+          "nanosecondsPerOperation": 21817.77708,
+          "heapBeforeBytes": 7318272,
+          "heapAfterBytes": 7333016,
+          "heapDeltaBytes": 14744,
           "outputBytes": 2236,
           "explicitGc": true,
           "sink": 101000
@@ -278,11 +278,11 @@
         {
           "processIndex": 4,
           "scenario": "ten-nested-nodes",
-          "elapsedNanoseconds": 1371905666,
-          "nanosecondsPerOperation": 13719.05666,
-          "heapBeforeBytes": 7317416,
-          "heapAfterBytes": 7331352,
-          "heapDeltaBytes": 13936,
+          "elapsedNanoseconds": 1503300667,
+          "nanosecondsPerOperation": 15033.00667,
+          "heapBeforeBytes": 7317720,
+          "heapAfterBytes": 7331808,
+          "heapDeltaBytes": 14088,
           "outputBytes": 2236,
           "explicitGc": true,
           "sink": 101000
@@ -290,20 +290,20 @@
         {
           "processIndex": 5,
           "scenario": "ten-nested-nodes",
-          "elapsedNanoseconds": 1364059333,
-          "nanosecondsPerOperation": 13640.59333,
-          "heapBeforeBytes": 7317888,
-          "heapAfterBytes": 7332144,
-          "heapDeltaBytes": 14256,
+          "elapsedNanoseconds": 1448567625,
+          "nanosecondsPerOperation": 14485.67625,
+          "heapBeforeBytes": 7318168,
+          "heapAfterBytes": 7332008,
+          "heapDeltaBytes": 13840,
           "outputBytes": 2236,
           "explicitGc": true,
           "sink": 101000
         }
       ],
       "summary": {
-        "medianNanosecondsPerOperation": 13228.48459,
-        "p95NanosecondsPerOperation": 13719.05666,
-        "meanNanosecondsPerOperation": 13272.520584000002
+        "medianNanosecondsPerOperation": 17211.69917,
+        "p95NanosecondsPerOperation": 46158.93833,
+        "meanNanosecondsPerOperation": 22941.4195
       }
     },
     {
@@ -313,11 +313,11 @@
         {
           "processIndex": 1,
           "scenario": "two-interleaved-roots",
-          "elapsedNanoseconds": 3151923459,
-          "nanosecondsPerOperation": 31519.23459,
-          "heapBeforeBytes": 7397648,
-          "heapAfterBytes": 7415432,
-          "heapDeltaBytes": 17784,
+          "elapsedNanoseconds": 4018948167,
+          "nanosecondsPerOperation": 40189.48167,
+          "heapBeforeBytes": 7399144,
+          "heapAfterBytes": 7416976,
+          "heapDeltaBytes": 17832,
           "outputBytes": 4155,
           "explicitGc": true,
           "sink": 202000
@@ -325,10 +325,10 @@
         {
           "processIndex": 2,
           "scenario": "two-interleaved-roots",
-          "elapsedNanoseconds": 3201108083,
-          "nanosecondsPerOperation": 32011.08083,
-          "heapBeforeBytes": 7398784,
-          "heapAfterBytes": 7416568,
+          "elapsedNanoseconds": 7118453583,
+          "nanosecondsPerOperation": 71184.53583,
+          "heapBeforeBytes": 7399192,
+          "heapAfterBytes": 7416976,
           "heapDeltaBytes": 17784,
           "outputBytes": 4155,
           "explicitGc": true,
@@ -337,10 +337,10 @@
         {
           "processIndex": 3,
           "scenario": "two-interleaved-roots",
-          "elapsedNanoseconds": 4457045334,
-          "nanosecondsPerOperation": 44570.45334,
-          "heapBeforeBytes": 7398544,
-          "heapAfterBytes": 7416328,
+          "elapsedNanoseconds": 3371221375,
+          "nanosecondsPerOperation": 33712.21375,
+          "heapBeforeBytes": 7399280,
+          "heapAfterBytes": 7417064,
           "heapDeltaBytes": 17784,
           "outputBytes": 4155,
           "explicitGc": true,
@@ -349,11 +349,11 @@
         {
           "processIndex": 4,
           "scenario": "two-interleaved-roots",
-          "elapsedNanoseconds": 3260524500,
-          "nanosecondsPerOperation": 32605.245,
-          "heapBeforeBytes": 7396600,
-          "heapAfterBytes": 7414432,
-          "heapDeltaBytes": 17832,
+          "elapsedNanoseconds": 3186000750,
+          "nanosecondsPerOperation": 31860.0075,
+          "heapBeforeBytes": 7399176,
+          "heapAfterBytes": 7416960,
+          "heapDeltaBytes": 17784,
           "outputBytes": 4155,
           "explicitGc": true,
           "sink": 202000
@@ -361,20 +361,20 @@
         {
           "processIndex": 5,
           "scenario": "two-interleaved-roots",
-          "elapsedNanoseconds": 3242265583,
-          "nanosecondsPerOperation": 32422.65583,
-          "heapBeforeBytes": 7398808,
-          "heapAfterBytes": 7416592,
-          "heapDeltaBytes": 17784,
+          "elapsedNanoseconds": 3209741416,
+          "nanosecondsPerOperation": 32097.41416,
+          "heapBeforeBytes": 7399160,
+          "heapAfterBytes": 7416992,
+          "heapDeltaBytes": 17832,
           "outputBytes": 4155,
           "explicitGc": true,
           "sink": 202000
         }
       ],
       "summary": {
-        "medianNanosecondsPerOperation": 32422.65583,
-        "p95NanosecondsPerOperation": 44570.45334,
-        "meanNanosecondsPerOperation": 34625.733918
+        "medianNanosecondsPerOperation": 33712.21375,
+        "p95NanosecondsPerOperation": 71184.53583,
+        "meanNanosecondsPerOperation": 41808.730582000004
       }
     }
   ]
