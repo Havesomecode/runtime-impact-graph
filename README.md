@@ -2,10 +2,12 @@
 
 Build deterministic semantic dependency graphs from real Node.js execution.
 
-## v0.1 package foundation
+## v0.1 graph generator
 
-The repository now contains the reusable TypeScript package foundation for the
-frozen v0.1 contract:
+The repository contains the reusable TypeScript graph generator for the frozen
+v0.1 contract. It captures isolated asynchronous execution scopes, aggregates
+repeated observations, merges portable snapshots, reports dependency cycles,
+and emits deterministic JSON and DOT:
 
 - `docs/architecture-contract-v0.1.md` — API, model, async-context,
   determinism, safety, packaging, export, and benchmark contract.
@@ -17,7 +19,9 @@ identifiers. The package is private; they do not reserve or decide a public npm
 name, scope, or release version.
 
 This project records consumer-defined semantic relationships from observed
-asynchronous work. It is not static dependency analysis, automatic call
+asynchronous work. An absent edge means only that the relationship was not
+observed in the captured executions; it does not prove the relationship is
+impossible. The graph is not static dependency analysis, automatic call
 tracing, a distributed tracing replacement, or proof that an observed
 relationship caused a reload, invalidation, or execution outcome.
 
