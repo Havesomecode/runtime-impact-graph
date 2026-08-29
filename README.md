@@ -53,16 +53,15 @@ The project does not install Graphviz or require it at runtime.
 
 ## Use the library
 
-The manifest name and `0.0.0-development` version are private development
-identifiers. They do not reserve a public npm name or promise that the package is
-already available from a registry. In a package consumer, the API looks like
-this:
+The public package is scoped as `@havesomecode/runtime-impact-graph` at version `0.1.0`.
+This release candidate is not yet available from a registry. In a package
+consumer, the API looks like this:
 
 ```ts
 import {
   createGraph,
   toCanonicalJson,
-} from 'runtime-impact-graph';
+} from '@havesomecode/runtime-impact-graph';
 
 const graph = createGraph({ metadataSchema: {} });
 
@@ -88,8 +87,9 @@ process.stdout.write(toCanonicalJson(graph.snapshot()));
 
 The root entry point exports `createGraph`, `Graph`, `mergeSnapshots`,
 `toCanonicalJson`, `toDot`, the v0.1 model types, and named contract errors.
-Formatter-only subpaths are available at `runtime-impact-graph/json` and
-`runtime-impact-graph/dot`. See the [practical API guide](./docs/api-v0.1.md) and
+Formatter-only subpaths are available at `@havesomecode/runtime-impact-graph/json`
+and `@havesomecode/runtime-impact-graph/dot`. See the
+[practical API guide](./docs/api-v0.1.md) and
 the [frozen architecture contract](./docs/architecture-contract-v0.1.md) for the
 full behavior.
 

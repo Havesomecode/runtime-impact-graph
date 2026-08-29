@@ -1,9 +1,19 @@
 {
-  "name": "runtime-impact-graph",
-  "version": "0.0.0-development",
+  "name": "@havesomecode/runtime-impact-graph",
+  "version": "0.1.0",
   "description": "Deterministic semantic dependency graphs from observed Node.js execution.",
-  "private": true,
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Havesomecode/runtime-impact-graph.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Havesomecode/runtime-impact-graph/issues"
+  },
+  "homepage": "https://github.com/Havesomecode/runtime-impact-graph#readme",
   "type": "module",
   "sideEffects": false,
   "engines": {

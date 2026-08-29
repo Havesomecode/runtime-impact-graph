@@ -7,7 +7,7 @@ and support policy remain frozen in
 ## Create a graph
 
 ```ts
-import { createGraph } from 'runtime-impact-graph';
+import { createGraph } from '@havesomecode/runtime-impact-graph';
 
 const graph = createGraph({ metadataSchema: {} });
 ```
@@ -101,7 +101,7 @@ import {
   mergeSnapshots,
   toCanonicalJson,
   toDot,
-} from 'runtime-impact-graph';
+} from '@havesomecode/runtime-impact-graph';
 
 const merged = mergeSnapshots([firstSnapshot, secondSnapshot]);
 const json = toCanonicalJson(merged);
@@ -115,7 +115,8 @@ containment cycles are rejected.
 
 `toCanonicalJson` writes newline-terminated deterministic JSON. `toDot` writes a
 metadata-free Graphviz projection. Formatter-only imports are also available at
-`runtime-impact-graph/json` and `runtime-impact-graph/dot`.
+`@havesomecode/runtime-impact-graph/json` and
+`@havesomecode/runtime-impact-graph/dot`.
 
 Dependency cycles are valid graph facts and appear as sorted strongly connected
 components in `snapshot.cycles`. Containment cycles throw
