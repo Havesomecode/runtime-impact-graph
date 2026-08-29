@@ -27,24 +27,31 @@ function assertRecord(value: unknown, name: string): asserts value is object {
   if (prototype !== Object.prototype && prototype !== null) {
     throw new TypeError(`${name} must be a plain record.`);
   }
-  if (Object.getOwnPropertySymbols(value).length > 0) {
-    throw new TypeError(`${name} must not contain symbol keys.`);
-  }
-  for (const descriptor of Object.values(
-    Object.getOwnPropertyDescriptors(value),
-  )) {
-    if (!('value' in descriptor) || descriptor.enumerable !== true) {
+}
+
+function capturedEntries(
+  value: object,
+  name: string,
+): readonly (readonly [string, unknown])[] {
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const entries: Array<readonly [string, unknown]> = [];
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== 'string') {
+      throw new TypeError(`${name} must not contain symbol keys.`);
+    }
+    const descriptor = descriptors[key];
+    if (
+      descriptor === undefined ||
+      !('value' in descriptor) ||
+      descriptor.enumerable !== true
+    ) {
       throw new TypeError(
         `${name} must contain enumerable data properties only.`,
       );
     }
+    entries.push([key, descriptor.value]);
   }
-}
-
-function sortedEntries(value: object): readonly (readonly [string, unknown])[] {
-  return Object.entries(value).sort(([left], [right]) =>
-    compareCanonical(left, right),
-  );
+  return entries.sort(([left], [right]) => compareCanonical(left, right));
 }
 
 export function assertSafeMetadataKey(key: string): void {
@@ -54,49 +61,66 @@ export function assertSafeMetadataKey(key: string): void {
 }
 
 function normalizeRule(value: unknown, key: string): MetadataRule {
-  assertRecord(value, `Metadata rule ${JSON.stringify(key)}`);
-  for (const property of Object.keys(value)) {
+  const name = `Metadata rule ${JSON.stringify(key)}`;
+  assertRecord(value, name);
+  const entries = capturedEntries(value, name);
+  for (const [property] of entries) {
     if (!RULE_KEYS.has(property)) {
       throw new TypeError(
         `Unknown metadata rule property ${JSON.stringify(property)}.`,
       );
     }
   }
-  const rule = value as Partial<MetadataRule>;
-  if (!['string', 'number', 'boolean'].includes(String(rule.type))) {
+  const rule = value as Record<string, unknown>;
+  const ownProperties = new Set(entries.map(([property]) => property));
+  const read = (property: string): unknown =>
+    ownProperties.has(property) ? rule[property] : undefined;
+  const type = read('type');
+  const mode = read('mode');
+  const maxDistinct = read('maxDistinct');
+  const declaredMaxStringLength = read('maxStringLength');
+  const declaredRedact = read('redact');
+  if (type !== 'string' && type !== 'number' && type !== 'boolean') {
     throw new TypeError(`Invalid metadata type for ${JSON.stringify(key)}.`);
   }
-  if (rule.mode !== 'constant' && rule.mode !== 'set') {
+  if (mode !== 'constant' && mode !== 'set') {
     throw new TypeError(`Invalid metadata mode for ${JSON.stringify(key)}.`);
   }
   if (
-    rule.mode === 'set' &&
-    (!Number.isSafeInteger(rule.maxDistinct) ||
-      (rule.maxDistinct ?? 0) < 1 ||
-      (rule.maxDistinct ?? 0) > 32)
+    mode === 'set' &&
+    (typeof maxDistinct !== 'number' ||
+      !Number.isSafeInteger(maxDistinct) ||
+      maxDistinct < 1 ||
+      maxDistinct > 32)
   ) {
     throw new TypeError(`Invalid maxDistinct for ${JSON.stringify(key)}.`);
   }
-  if (rule.mode === 'constant' && rule.maxDistinct !== undefined) {
+  if (mode === 'constant' && maxDistinct !== undefined) {
     throw new TypeError(`constant metadata cannot declare maxDistinct.`);
   }
-  const maxStringLength = rule.maxStringLength ?? 128;
+  const maxStringLength = declaredMaxStringLength ?? 128;
   if (
+    typeof maxStringLength !== 'number' ||
     !Number.isSafeInteger(maxStringLength) ||
     maxStringLength < 1 ||
     maxStringLength > 512
   ) {
     throw new TypeError(`Invalid maxStringLength for ${JSON.stringify(key)}.`);
   }
-  const redact = rule.redact ?? 'drop';
-  if (!['none', 'drop', 'replace', 'sha256'].includes(redact)) {
+  const redact = declaredRedact ?? 'drop';
+  if (
+    redact !== 'none' &&
+    redact !== 'drop' &&
+    redact !== 'replace' &&
+    redact !== 'sha256'
+  ) {
     throw new TypeError(`Invalid redaction for ${JSON.stringify(key)}.`);
   }
 
   return Object.freeze({
-    type: rule.type,
-    mode: rule.mode,
-    ...(rule.mode === 'set' ? { maxDistinct: rule.maxDistinct } : {}),
+    type,
+    mode,
+    ...(mode === 'set' ? { maxDistinct } : {}),
     maxStringLength,
     redact,
   } as MetadataRule);
@@ -107,7 +131,7 @@ export function normalizeMetadataSchema(
 ): MetadataSchema {
   assertRecord(schema, 'metadataSchema');
   const normalized: Record<string, MetadataRule> = {};
-  for (const [key, value] of sortedEntries(schema)) {
+  for (const [key, value] of capturedEntries(schema, 'metadataSchema')) {
     assertSafeMetadataKey(key);
     normalized[key] = normalizeRule(value, key);
   }
@@ -197,9 +221,12 @@ export function processMetadata(
 ): NodeV1['metadata'] {
   if (input === undefined) return Object.freeze({});
   assertRecord(input, 'metadata');
+  capturedEntries(input, 'metadata');
 
   const output: Record<string, MetadataValue | readonly MetadataValue[]> = {};
-  for (const [key, value] of sortedEntries(input)) {
+  for (const [key, value] of Object.entries(input).sort(([left], [right]) =>
+    compareCanonical(left, right),
+  )) {
     assertSafeMetadataKey(key);
     const rule = schema[key];
     if (rule === undefined) {

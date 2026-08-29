@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 
 import {
   createGraph,
+  toCanonicalJson,
   type GraphSnapshotV1,
+  type MetadataRule,
   type MetadataValue,
   type NodeV1,
 } from '../src/index.js';
@@ -42,6 +45,52 @@ function replaceFirstNode(
   return {
     ...snapshot,
     nodes: [{ ...node, ...updates }, ...snapshot.nodes.slice(1)],
+  };
+}
+
+function adversarialSnapshot(): GraphSnapshotV1 {
+  const graph = createGraph({
+    metadataSchema: {},
+    maxEdges: 2,
+    onLimit: 'drop',
+  });
+  graph.run(() => {
+    graph.observe({ id: 'a', kind: 'resource', label: 'A' });
+    graph.observe({ id: 'b', kind: 'resource', label: 'B' });
+    graph.dependsOn('a', 'b');
+    graph.dependsOn('b', 'a');
+    graph.dependsOn('a', 'a');
+  });
+  const snapshot = graph.snapshot();
+  assert.equal(snapshot.nodes.length, 2);
+  assert.equal(snapshot.edges.length, 2);
+  assert.equal(snapshot.cycles.length, 1);
+  assert.equal(snapshot.warnings.length, 1);
+  return snapshot;
+}
+
+function assertSelfValidating(snapshot: GraphSnapshotV1): void {
+  const json = toCanonicalJson(snapshot);
+  assert.equal(toCanonicalJson(JSON.parse(json) as GraphSnapshotV1), json);
+}
+
+function changingField<T extends object>(
+  target: T,
+  field: PropertyKey,
+  laterValue: unknown,
+): { readonly proxy: T; readonly reads: () => number } {
+  let reads = 0;
+  return {
+    proxy: new Proxy(target, {
+      get: (currentTarget, property, receiver): unknown => {
+        if (property === field) {
+          reads += 1;
+          if (reads > 1) return laterValue;
+        }
+        return Reflect.get(currentTarget, property, receiver);
+      },
+    }),
+    reads: () => reads,
   };
 }
 
@@ -195,6 +244,424 @@ describe('portable snapshot merge', () => {
 
     assert.equal(reads, 1);
     assert.equal(merged.schemaFingerprint, snapshot.schemaFingerprint);
+  });
+
+  for (const [field, laterValue] of [
+    ['format', 'forged-format'],
+    ['schemaFingerprint', 'forged-fingerprint'],
+    ['metadataPolicy', null],
+    ['nodes', { map: () => [{ id: 'forged' }] }],
+    ['edges', { map: () => [{ kind: 'forged' }] }],
+    ['cycles', { map: () => [['forged']] }],
+    ['warnings', { map: () => [{ code: 'forged-warning', count: 0 }] }],
+  ] as const) {
+    it(`captures snapshot envelope ${field} once`, () => {
+      const snapshot = adversarialSnapshot();
+      const changing = changingField(snapshot, field, laterValue);
+
+      assertSelfValidating(changing.proxy);
+
+      assert.equal(changing.reads(), 1);
+    });
+  }
+
+  for (const [field, laterValue] of [
+    ['id', 'forged\0id'],
+    ['kind', 'forged-kind'],
+    ['label', ''],
+    ['metadata', { undeclared: 'forged' }],
+    ['observations', 0],
+  ] as const) {
+    it(`captures snapshot node ${field} once`, () => {
+      const snapshot = adversarialSnapshot();
+      const node = snapshot.nodes[0];
+      assert.ok(node);
+      const changing = changingField(node, field, laterValue);
+      const input = {
+        ...snapshot,
+        nodes: [changing.proxy, ...snapshot.nodes.slice(1)],
+      };
+
+      assertSelfValidating(input);
+
+      assert.equal(changing.reads(), 1);
+    });
+  }
+
+  for (const [field, laterValue] of [
+    ['from', 'unknown'],
+    ['to', 'unknown'],
+    ['kind', 'forged-kind'],
+    ['observations', 0],
+  ] as const) {
+    it(`captures snapshot edge ${field} once`, () => {
+      const snapshot = adversarialSnapshot();
+      const edge = snapshot.edges[0];
+      assert.ok(edge);
+      const changing = changingField(edge, field, laterValue);
+      const input = {
+        ...snapshot,
+        edges: [changing.proxy, ...snapshot.edges.slice(1)],
+      };
+
+      assertSelfValidating(input);
+
+      assert.equal(changing.reads(), 1);
+    });
+  }
+
+  for (const [field, laterValue] of [
+    ['code', 'forged-warning'],
+    ['count', 0],
+  ] as const) {
+    it(`captures snapshot warning ${field} once`, () => {
+      const snapshot = adversarialSnapshot();
+      const warning = snapshot.warnings[0];
+      assert.ok(warning);
+      const changing = changingField(warning, field, laterValue);
+      const input = { ...snapshot, warnings: [changing.proxy] };
+
+      assertSelfValidating(input);
+
+      assert.equal(changing.reads(), 1);
+    });
+  }
+
+  it('does not invoke attacker-controlled map methods on snapshot arrays', () => {
+    const snapshot = adversarialSnapshot();
+    const cycle = snapshot.cycles[0];
+    assert.ok(cycle);
+    let invocations = 0;
+    const proxiedCycle = new Proxy(cycle, {
+      get: (target, property, receiver): unknown => {
+        if (property === 'map') {
+          return (): readonly string[] => {
+            invocations += 1;
+            return [...cycle];
+          };
+        }
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    });
+
+    assertSelfValidating({ ...snapshot, cycles: [proxiedCycle] });
+
+    assert.equal(invocations, 0);
+  });
+
+  it('captures every snapshot metadata rule field once', () => {
+    const graph = createGraph({
+      metadataSchema: {
+        tag: {
+          type: 'string',
+          mode: 'set',
+          maxDistinct: 2,
+          maxStringLength: 16,
+          redact: 'none',
+        },
+      },
+    });
+    const snapshot = graph.snapshot();
+    const rule = snapshot.metadataPolicy.schema.tag;
+    assert.ok(rule);
+    const replacements = {
+      type: 'forged-type',
+      mode: 'forged-mode',
+      maxDistinct: 0,
+      maxStringLength: 0,
+      redact: 'forged-redaction',
+    } as const;
+
+    for (const field of Object.keys(replacements) as Array<
+      keyof typeof replacements
+    >) {
+      const changing: {
+        readonly proxy: MetadataRule;
+        readonly reads: () => number;
+      } = changingField<MetadataRule>({ ...rule }, field, replacements[field]);
+      const input = {
+        ...snapshot,
+        metadataPolicy: {
+          ...snapshot.metadataPolicy,
+          schema: { tag: changing.proxy },
+        },
+      };
+
+      assertSelfValidating(input);
+      assert.equal(changing.reads(), 1, field);
+    }
+  });
+
+  it('rejects accessor-backed nested records without invoking getters or mutating input', () => {
+    const snapshot = adversarialSnapshot();
+    const cases = [
+      { collection: 'nodes', value: snapshot.nodes[0], field: 'id' },
+      { collection: 'edges', value: snapshot.edges[0], field: 'from' },
+      { collection: 'warnings', value: snapshot.warnings[0], field: 'code' },
+    ] as const;
+
+    for (const testCase of cases) {
+      assert.ok(testCase.value);
+      const record = { ...testCase.value } as Record<string, unknown>;
+      let reads = 0;
+      Object.defineProperty(record, testCase.field, {
+        enumerable: true,
+        get: () => {
+          reads += 1;
+          return undefined;
+        },
+      });
+      const before = Object.getOwnPropertyDescriptors(record);
+      const input = {
+        ...snapshot,
+        [testCase.collection]: [record],
+      } as GraphSnapshotV1;
+
+      assert.throws(() => toCanonicalJson(input), /data properties/u);
+      assert.equal(reads, 0);
+      assert.deepEqual(Object.getOwnPropertyDescriptors(record), before);
+    }
+  });
+
+  it('rejects accessor-backed snapshot array elements without invoking getters', () => {
+    const snapshot = adversarialSnapshot();
+
+    for (const collection of [
+      'nodes',
+      'edges',
+      'cycles',
+      'warnings',
+    ] as const) {
+      const values = [...snapshot[collection]];
+      const original = values[0];
+      assert.ok(original);
+      let reads = 0;
+      Object.defineProperty(values, 0, {
+        configurable: true,
+        enumerable: true,
+        get: () => {
+          reads += 1;
+          return original;
+        },
+      });
+      const before = Object.getOwnPropertyDescriptors(values);
+
+      assert.throws(
+        () => toCanonicalJson({ ...snapshot, [collection]: values }),
+        /data properties/u,
+      );
+      assert.equal(reads, 0, collection);
+      assert.deepEqual(Object.getOwnPropertyDescriptors(values), before);
+    }
+
+    const cycle = [...(snapshot.cycles[0] ?? [])];
+    const member = cycle[0];
+    assert.ok(member);
+    let memberReads = 0;
+    Object.defineProperty(cycle, 0, {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        memberReads += 1;
+        return member;
+      },
+    });
+
+    assert.throws(
+      () => toCanonicalJson({ ...snapshot, cycles: [cycle] }),
+      /data properties/u,
+    );
+    assert.equal(memberReads, 0);
+  });
+
+  it('ignores a Proxy-controlled array length getter', () => {
+    const snapshot = createGraph({ metadataSchema: {} }).snapshot();
+    let reads = 0;
+    const nodes = new Proxy([...snapshot.nodes], {
+      get: (target, property, receiver): unknown => {
+        if (property === 'length') {
+          reads += 1;
+          return Number.NaN;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    assertSelfValidating({ ...snapshot, nodes });
+    assert.equal(reads, 0);
+  });
+
+  it('rejects metadata rule types that only coerce to a valid type', () => {
+    const graph = createGraph({
+      metadataSchema: {
+        tag: { type: 'string', mode: 'constant', redact: 'none' },
+      },
+    });
+    const snapshot = graph.snapshot();
+    const rule = snapshot.metadataPolicy.schema.tag;
+    assert.ok(rule);
+    const invalidType = { toString: () => 'string' };
+    const metadataPolicy = {
+      schema: { tag: { ...rule, type: invalidType } },
+    } as unknown as GraphSnapshotV1['metadataPolicy'];
+    const schemaFingerprint = createHash('sha256')
+      .update(
+        JSON.stringify({
+          format: 'runtime-impact-graph/metadata-policy',
+          version: '0.1',
+          schema: metadataPolicy.schema,
+        }),
+      )
+      .digest('hex');
+
+    assert.throws(
+      () => toCanonicalJson({ ...snapshot, metadataPolicy, schemaFingerprint }),
+      /Invalid metadata type/u,
+    );
+  });
+
+  it('captures a record prototype once before validating it', () => {
+    const snapshot = adversarialSnapshot();
+    const node = snapshot.nodes[0];
+    assert.ok(node);
+    let reads = 0;
+    const changingPrototype = new Proxy(
+      { ...node },
+      {
+        getPrototypeOf: () => {
+          reads += 1;
+          return reads === 1 ? { forged: true } : null;
+        },
+      },
+    );
+
+    assert.throws(
+      () =>
+        toCanonicalJson({
+          ...snapshot,
+          nodes: [changingPrototype, ...snapshot.nodes.slice(1)],
+        }),
+      /plain object/u,
+    );
+    assert.equal(reads, 1);
+  });
+
+  it('captures nested record keys once before validating fields', () => {
+    const snapshot = adversarialSnapshot();
+    const node = snapshot.nodes[0];
+    assert.ok(node);
+    const forged = Symbol('forged');
+    let ownKeysCalls = 0;
+    const changingKeys = new Proxy(
+      { ...node },
+      {
+        ownKeys: (target) => {
+          ownKeysCalls += 1;
+          const keys = Reflect.ownKeys(target);
+          return ownKeysCalls === 1 ? keys : [...keys, forged];
+        },
+      },
+    );
+
+    assertSelfValidating({
+      ...snapshot,
+      nodes: [changingKeys, ...snapshot.nodes.slice(1)],
+    });
+    assert.equal(ownKeysCalls, 1);
+  });
+
+  it('captures metadata rule keys once before validating fields', () => {
+    const graph = createGraph({
+      metadataSchema: {
+        tag: { type: 'string', mode: 'constant', redact: 'none' },
+      },
+    });
+    const snapshot = graph.snapshot();
+    const rule = snapshot.metadataPolicy.schema.tag;
+    assert.ok(rule);
+    const forged = Symbol('forged');
+    let ownKeysCalls = 0;
+    const changingKeys = new Proxy(
+      { ...rule },
+      {
+        ownKeys: (target) => {
+          ownKeysCalls += 1;
+          const keys = Reflect.ownKeys(target);
+          return ownKeysCalls === 1 ? keys : [...keys, forged];
+        },
+      },
+    );
+
+    assertSelfValidating({
+      ...snapshot,
+      metadataPolicy: {
+        schema: { tag: changingKeys },
+      },
+    });
+    assert.equal(ownKeysCalls, 1);
+  });
+
+  it('rejects required snapshot fields supplied only by a Proxy get trap', () => {
+    const snapshot = adversarialSnapshot();
+    const node = snapshot.nodes[0];
+    assert.ok(node);
+    const withoutId = Object.fromEntries(
+      Object.entries(node).filter(([property]) => property !== 'id'),
+    );
+    let reads = 0;
+    const inheritedId = new Proxy(withoutId, {
+      get: (target, property, receiver): unknown => {
+        if (property === 'id') {
+          reads += 1;
+          return node.id;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    assert.throws(
+      () =>
+        toCanonicalJson({
+          ...snapshot,
+          nodes: [inheritedId, ...snapshot.nodes.slice(1)],
+        } as GraphSnapshotV1),
+      /Snapshot node is invalid/u,
+    );
+    assert.equal(reads, 0);
+  });
+
+  it('rejects metadata rule fields supplied only by a Proxy get trap', () => {
+    const graph = createGraph({
+      metadataSchema: {
+        tag: { type: 'string', mode: 'constant', redact: 'none' },
+      },
+    });
+    const snapshot = graph.snapshot();
+    const rule = snapshot.metadataPolicy.schema.tag;
+    assert.ok(rule);
+    const withoutType = Object.fromEntries(
+      Object.entries(rule).filter(([property]) => property !== 'type'),
+    );
+    let reads = 0;
+    const inheritedType = new Proxy(withoutType, {
+      get: (target, property, receiver): unknown => {
+        if (property === 'type') {
+          reads += 1;
+          return rule.type;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    assert.throws(
+      () =>
+        toCanonicalJson({
+          ...snapshot,
+          metadataPolicy: { schema: { tag: inheritedType } },
+        } as unknown as GraphSnapshotV1),
+      /Invalid metadata type/u,
+    );
+    assert.equal(reads, 0);
   });
 
   it('aborts count-overflow merges without mutating any input snapshot', async () => {
