@@ -1,0 +1,19 @@
+strict digraph RuntimeImpactGraph {
+  graph [rankdir="LR"];
+  node [shape="box"];
+  edge [];
+  "capability:recommend-places" [label="Recommend places\ncapability"];
+  "derived:ranked-places" [label="Ranked places\nderived"];
+  "loader:place-context" [label="Place context loader\nloader"];
+  "resource:catalog-api" [label="Place catalog API\nresource"];
+  "resource:forecast-api" [label="Forecast API\nresource"];
+  "route:discover" [label="Discover route\nroute"];
+  "route:weekend-plan" [label="Weekend plan route\nroute"];
+  "capability:recommend-places" -> "loader:place-context" [label="contains × 2"];
+  "derived:ranked-places" -> "capability:recommend-places" [label="dependsOn × 2"];
+  "loader:place-context" -> "derived:ranked-places" [label="dependsOn × 2"];
+  "resource:catalog-api" -> "loader:place-context" [label="dependsOn × 2"];
+  "resource:forecast-api" -> "loader:place-context" [label="dependsOn × 2"];
+  "route:discover" -> "capability:recommend-places" [label="contains × 1"];
+  "route:weekend-plan" -> "capability:recommend-places" [label="contains × 1"];
+}

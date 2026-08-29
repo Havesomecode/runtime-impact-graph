@@ -4,3 +4,5 @@ package-lock.json
 docs
 README.md
 LICENSE
+examples/generated
+bench/results
